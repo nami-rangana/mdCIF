@@ -1,0 +1,45 @@
+# Conda environment for mdcif development.
+#   mamba env create -f environment.yml     (or: conda env create -f environment.yml)
+#   conda activate mdcif
+#   pip install -e . --no-deps              (deps come from conda; see note below)
+# Update after editing this file:
+#   mamba env update -f environment.yml --prune
+name: mdcif
+channels:
+  - conda-forge
+variables:
+  # conda-forge MKL's default Intel-OpenMP threading layer crashes on win-64
+  # (0xC06D007F, delay-load procedure not found in llvm-openmp's libiomp5md.dll)
+  # on the first BLAS call; TBB and SEQUENTIAL work.
+  MKL_THREADING_LAYER: TBB
+dependencies:
+  - python=3.11              # matches ChimeraX 1.10/1.11 embedded Python
+  - pip
+  # numerics
+  - numpy
+  - scipy                    # Windows + Smart App Control: replaced by PyPI wheel, see README
+  - tbb                      # MKL threading layer (see variables above)
+  # MD trajectories & analysis
+  - mdanalysis>=2.7
+  - scikit-learn>=1.3        # HDBSCAN (and any other clustering you bring)
+  # mmCIF / PDB-IHM
+  - gemmi
+  - ihm>=2.0                 # python-ihm: read/write/validate IHM mmCIF + BinaryCIF
+  # provenance, CLI, utilities
+  - pyyaml
+  - typer
+  # visualization & notebooks
+  - matplotlib
+  - jupyterlab
+  - ipywidgets
+  - py3dmol                  # 3D views in the example notebook
+  - nglview                  # optional alternative notebook viewer
+  - pymol-open-source        # for developing/testing the PyMOL plugin
+  # testing & dev
+  - mdanalysistests          # AdK test trajectories
+  - pytest
+  - pytest-cov
+  - ruff
+  - pre-commit
+# mdcif itself is installed separately with `pip install -e . --no-deps`, so that
+# pip never re-resolves (and replaces) the conda-provided dependencies.
