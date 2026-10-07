@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------- Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.whl
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ---------------------------------------------------------------- Environments
+.venv/
+venv/
+.env
+
+# ---------------------------------------------------------------- Jupyter
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------- Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---------------------------------------------------------------- MD trajectories & engine outputs (large)
+# Small .pdb / .cif / .gro / topology files stay tracked on purpose.
+*.xtc
+*.trr
+*.dcd
+*.nc
+*.ncdf
+*.ncrst
+*.mdcrd
+*.tng
+*.h5
+*.cpt
+*.edr
+*.tpr
+*.log
+slurm-*.out
+# GROMACS backup files (#name.ext.1#)
+\#*#
+
+# ---------------------------------------------------------------- Cached arrays
+*.npy
+*.npz
+# ...but keep small test fixtures
+!tests/data/**
+
+# ---------------------------------------------------------------- Data / output folders
+examples/data/*
+!examples/data/README.md
+output/
+results/
+scratch/
+
+# ---------------------------------------------------------------- ChimeraX bundle builds
+viewers/chimerax/build/
+viewers/chimerax/dist/
