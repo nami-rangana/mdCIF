@@ -1,0 +1,572 @@
+data_mdcif_ext.dic
+
+_datablock.id                 mdcif_ext.dic
+_datablock.description
+;
+     DRAFT extension dictionary for mdcif: MD simulation provenance,
+     global and per-model essential (PCA / quasi-harmonic) modes, and the
+     projection of the trajectory frames onto the global modes. Intended to
+     be used together with mmcif_pdbx.dic and mmcif_ihm.dic.
+;
+
+_dictionary.title             mdcif_ext.dic
+_dictionary.datablock_id      mdcif_ext.dic
+_dictionary.version           0.0.2
+
+loop_
+_dictionary_history.version
+_dictionary_history.update
+_dictionary_history.revision
+0.0.1 2026-10-05 'Initial draft: mdcif_simulation, mdcif_mode, mdcif_mode_vector.'
+0.0.2 2026-10-06
+;   Mode sets (global + per cluster): new mdcif_mode_set, mdcif_mode_origin,
+    mdcif_projection; mdcif_mode now points at a mode set.
+;
+
+##############################################################################
+#                           MDCIF_SIMULATION                                 #
+##############################################################################
+
+save_mdcif_simulation
+    _category.description
+;   Conditions of an MD simulation that are not covered by the IHM
+    modeling protocol categories.
+;
+    _category.id                  mdcif_simulation
+    _category.mandatory_code      no
+    _category_key.name            '_mdcif_simulation.id'
+    loop_
+    _category_group.id            'inclusive_group'
+    save_
+
+save__mdcif_simulation.id
+    _item_description.description  'Unique identifier for this simulation.'
+    _item.name                     '_mdcif_simulation.id'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           yes
+    _item_type.code                int
+    save_
+
+save__mdcif_simulation.protocol_id
+    _item_description.description  'The IHM modeling protocol this simulation belongs to.'
+    _item.name                     '_mdcif_simulation.protocol_id'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                int
+    _item_linked.child_name        '_mdcif_simulation.protocol_id'
+    _item_linked.parent_name       '_ihm_modeling_protocol.id'
+    save_
+
+save__mdcif_simulation.software_id
+    _item_description.description  'The MD engine, as listed in the software category.'
+    _item.name                     '_mdcif_simulation.software_id'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                int
+    _item_linked.child_name        '_mdcif_simulation.software_id'
+    _item_linked.parent_name       '_software.pdbx_ordinal'
+    save_
+
+save__mdcif_simulation.force_field
+    _item_description.description  'Force field, e.g. CHARMM36m or ff19SB.'
+    _item.name                     '_mdcif_simulation.force_field'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                line
+    save_
+
+save__mdcif_simulation.water_model
+    _item_description.description  'Water model, e.g. TIP3P or OPC; "implicit" or "none" if applicable.'
+    _item.name                     '_mdcif_simulation.water_model'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                line
+    save_
+
+save__mdcif_simulation.ensemble
+    _item_description.description  'Thermodynamic ensemble.'
+    _item.name                     '_mdcif_simulation.ensemble'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                ucode
+    loop_
+    _item_enumeration.value
+        NVE
+        NVT
+        NPT
+        NPAT
+        other
+    save_
+
+save__mdcif_simulation.temperature
+    _item_description.description  'Simulation temperature in kelvin.'
+    _item.name                     '_mdcif_simulation.temperature'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_
+
+save__mdcif_simulation.pressure
+    _item_description.description  'Simulation pressure in bar (NPT/NPAT only).'
+    _item.name                     '_mdcif_simulation.pressure'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_
+
+save__mdcif_simulation.timestep
+    _item_description.description  'Integration timestep in femtoseconds.'
+    _item.name                     '_mdcif_simulation.timestep'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_
+
+save__mdcif_simulation.length
+    _item_description.description  'Simulated time per replica in nanoseconds.'
+    _item.name                     '_mdcif_simulation.length'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_
+
+save__mdcif_simulation.num_replicas
+    _item_description.description  'Number of independent replicas.'
+    _item.name                     '_mdcif_simulation.num_replicas'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                int
+    save_
+
+save__mdcif_simulation.frame_interval
+    _item_description.description  'Time between saved frames used for analysis, in picoseconds.'
+    _item.name                     '_mdcif_simulation.frame_interval'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_
+
+save__mdcif_simulation.enhanced_sampling
+    _item_description.description  'Enhanced sampling method, e.g. none, REMD, metadynamics, GaMD.'
+    _item.name                     '_mdcif_simulation.enhanced_sampling'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                line
+    save_
+
+save__mdcif_simulation.details
+    _item_description.description  'Free-text details of the simulation setup.'
+    _item.name                     '_mdcif_simulation.details'
+    _item.category_id              mdcif_simulation
+    _item.mandatory_code           no
+    _item_type.code                text
+    save_
+
+##############################################################################
+#                             MDCIF_MODE_SET                                 #
+##############################################################################
+
+save_mdcif_mode_set
+    _category.description
+;   A set of essential modes (PCA or quasi-harmonic eigenvectors) from one
+    covariance analysis. Scope "global": all analysed frames, superposed on
+    their average; its leading modes are the axes the frames were clustered
+    on. Scope "cluster": the frames of one cluster, superposed on that
+    cluster's deposited model.
+;
+    _category.id                  mdcif_mode_set
+    _category.mandatory_code      no
+    _category_key.name            '_mdcif_mode_set.id'
+    loop_
+    _category_group.id            'inclusive_group'
+    save_
+
+save__mdcif_mode_set.id
+    _item_description.description  'Unique identifier for the mode set.'
+    _item.name                     '_mdcif_mode_set.id'
+    _item.category_id              mdcif_mode_set
+    _item.mandatory_code           yes
+    _item_type.code                int
+    save_
+
+save__mdcif_mode_set.scope
+    _item_description.description  'Which frames the covariance matrix was built from.'
+    _item.name                     '_mdcif_mode_set.scope'
+    _item.category_id              mdcif_mode_set
+    _item.mandatory_code           yes
+    _item_type.code                code
+    loop_
+    _item_enumeration.value
+    _item_enumeration.detail
+        global   'all analysed frames'
+        cluster  'the frames of the cluster given by ensemble_id'
+    save_
+
+save__mdcif_mode_set.model_id
+    _item_description.description
+;   The deposited model whose atoms the vector components (and origin)
+    refer to. For scope "cluster", the cluster's representative model; for
+    scope "global", the first model (all models share the same atoms and
+    coordinate frame).
+;
+    _item.name                     '_mdcif_mode_set.model_id'
+    _item.category_id              mdcif_mode_set
+    _item.mandatory_code           yes
+    _item_type.code                int
+    _item_linked.child_name        '_mdcif_mode_set.model_id'
+    _item_linked.parent_name       '_ihm_model_list.model_id'
+    save_
+
+save__mdcif_mode_set.ensemble_id
+    _item_description.description  'The cluster (ensemble) whose frames were analysed; "." for scope global.'
+    _item.name                     '_mdcif_mode_set.ensemble_id'
+    _item.category_id              mdcif_mode_set
+    _item.mandatory_code           no
+    _item_type.code                int
+    _item_linked.child_name        '_mdcif_mode_set.ensemble_id'
+    _item_linked.parent_name       '_ihm_ensemble_info.ensemble_id'
+    save_
+
+save__mdcif_mode_set.method
+    _item_description.description  'Method used to obtain the modes.'
+    _item.name                     '_mdcif_mode_set.method'
+    _item.category_id              mdcif_mode_set
+    _item.mandatory_code           yes
+    _item_type.code                line
+    loop_
+    _item_enumeration.value
+        PCA
+        quasi-harmonic
+        ANM
+        other
+    save_
+
+save__mdcif_mode_set.mass_weighted
+    _item_description.description  'Whether the covariance matrix was mass-weighted.'
+    _item.name                     '_mdcif_mode_set.mass_weighted'
+    _item.category_id              mdcif_mode_set
+    _item.mandatory_code           no
+    _item_type.code                ucode
+    loop_
+    _item_enumeration.value
+        YES
+        NO
+    save_
+
+save__mdcif_mode_set.atom_selection
+    _item_description.description  'Atoms included in the analysis, e.g. "name CA".'
+    _item.name                     '_mdcif_mode_set.atom_selection'
+    _item.category_id              mdcif_mode_set
+    _item.mandatory_code           no
+    _item_type.code                line
+    save_
+
+save__mdcif_mode_set.num_frames
+    _item_description.description  'Number of trajectory frames used to build the covariance matrix.'
+    _item.name                     '_mdcif_mode_set.num_frames'
+    _item.category_id              mdcif_mode_set
+    _item.mandatory_code           no
+    _item_type.code                int
+    save_
+
+save__mdcif_mode_set.total_variance
+    _item_description.description
+;   Trace of the covariance matrix (sum of all eigenvalues), in square
+    angstroms (amu * square angstroms if mass_weighted is YES).
+;
+    _item.name                     '_mdcif_mode_set.total_variance'
+    _item.category_id              mdcif_mode_set
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_
+
+save__mdcif_mode_set.details
+    _item_description.description  'Free-text description of the analysis.'
+    _item.name                     '_mdcif_mode_set.details'
+    _item.category_id              mdcif_mode_set
+    _item.mandatory_code           no
+    _item_type.code                text
+    save_
+
+##############################################################################
+#                               MDCIF_MODE                                   #
+##############################################################################
+
+save_mdcif_mode
+    _category.description
+;   One essential mode of a mode set: its eigenvalue and the fraction of the
+    total variance it explains. Components are in mdcif_mode_vector.
+;
+    _category.id                  mdcif_mode
+    _category.mandatory_code      no
+    _category_key.name            '_mdcif_mode.id'
+    loop_
+    _category_group.id            'inclusive_group'
+    save_
+
+save__mdcif_mode.id
+    _item_description.description  'Unique identifier for the mode.'
+    _item.name                     '_mdcif_mode.id'
+    _item.category_id              mdcif_mode
+    _item.mandatory_code           yes
+    _item_type.code                int
+    save_
+
+save__mdcif_mode.mode_set_id
+    _item_description.description  'The mode set this mode belongs to.'
+    _item.name                     '_mdcif_mode.mode_set_id'
+    _item.category_id              mdcif_mode
+    _item.mandatory_code           yes
+    _item_type.code                int
+    _item_linked.child_name        '_mdcif_mode.mode_set_id'
+    _item_linked.parent_name       '_mdcif_mode_set.id'
+    save_
+
+save__mdcif_mode.mode_index
+    _item_description.description  'Rank of the mode in its set; 1 is the largest-variance mode.'
+    _item.name                     '_mdcif_mode.mode_index'
+    _item.category_id              mdcif_mode
+    _item.mandatory_code           yes
+    _item_type.code                int
+    save_
+
+save__mdcif_mode.eigenvalue
+    _item_description.description
+;   Eigenvalue of the mode: variance along the mode in square angstroms
+    (amu * square angstroms if the set is mass-weighted).
+;
+    _item.name                     '_mdcif_mode.eigenvalue'
+    _item.category_id              mdcif_mode
+    _item.mandatory_code           yes
+    _item_type.code                float
+    save_
+
+save__mdcif_mode.variance_fraction
+    _item_description.description  'Fraction (0-1) of the total variance explained by this mode.'
+    _item.name                     '_mdcif_mode.variance_fraction'
+    _item.category_id              mdcif_mode
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_
+
+save__mdcif_mode.cumulative_variance_fraction
+    _item_description.description  'Fraction (0-1) of the total variance explained by modes 1..mode_index.'
+    _item.name                     '_mdcif_mode.cumulative_variance_fraction'
+    _item.category_id              mdcif_mode
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_
+
+##############################################################################
+#                            MDCIF_MODE_VECTOR                               #
+##############################################################################
+
+save_mdcif_mode_vector
+    _category.description
+;   Per-atom components of a mode eigenvector, as a Cartesian displacement
+    in the frame of the deposited model. The full 3N vector has unit length.
+;
+    _category.id                  mdcif_mode_vector
+    _category.mandatory_code      no
+    loop_
+    _category_key.name            '_mdcif_mode_vector.mode_id'
+                                  '_mdcif_mode_vector.atom_id'
+    loop_
+    _category_group.id            'inclusive_group'
+    save_
+
+save__mdcif_mode_vector.mode_id
+    _item_description.description  'The mode this component belongs to.'
+    _item.name                     '_mdcif_mode_vector.mode_id'
+    _item.category_id              mdcif_mode_vector
+    _item.mandatory_code           yes
+    _item_type.code                int
+    _item_linked.child_name        '_mdcif_mode_vector.mode_id'
+    _item_linked.parent_name       '_mdcif_mode.id'
+    save_
+
+save__mdcif_mode_vector.atom_id
+    _item_description.description  'The atom (in the mode model) this component applies to.'
+    _item.name                     '_mdcif_mode_vector.atom_id'
+    _item.category_id              mdcif_mode_vector
+    _item.mandatory_code           yes
+    _item_type.code                code
+    _item_linked.child_name        '_mdcif_mode_vector.atom_id'
+    _item_linked.parent_name       '_atom_site.id'
+    save_
+
+save__mdcif_mode_vector.dx
+    _item_description.description  'X component of the eigenvector for this atom.'
+    _item.name                     '_mdcif_mode_vector.dx'
+    _item.category_id              mdcif_mode_vector
+    _item.mandatory_code           yes
+    _item_type.code                float
+    save_
+
+save__mdcif_mode_vector.dy
+    _item_description.description  'Y component of the eigenvector for this atom.'
+    _item.name                     '_mdcif_mode_vector.dy'
+    _item.category_id              mdcif_mode_vector
+    _item.mandatory_code           yes
+    _item_type.code                float
+    save_
+
+save__mdcif_mode_vector.dz
+    _item_description.description  'Z component of the eigenvector for this atom.'
+    _item.name                     '_mdcif_mode_vector.dz'
+    _item.category_id              mdcif_mode_vector
+    _item.mandatory_code           yes
+    _item_type.code                float
+    save_
+
+##############################################################################
+#                            MDCIF_MODE_ORIGIN                               #
+##############################################################################
+
+save_mdcif_mode_origin
+    _category.description
+;   The mean structure a mode set was computed about, on the atoms of its
+    vectors. Written for the global set so that any structure, superposed on
+    this origin, can be projected onto the modes: p_i = (x - origin) . v_i.
+;
+    _category.id                  mdcif_mode_origin
+    _category.mandatory_code      no
+    loop_
+    _category_key.name            '_mdcif_mode_origin.mode_set_id'
+                                  '_mdcif_mode_origin.atom_id'
+    loop_
+    _category_group.id            'inclusive_group'
+    save_
+
+save__mdcif_mode_origin.mode_set_id
+    _item_description.description  'The mode set this origin belongs to.'
+    _item.name                     '_mdcif_mode_origin.mode_set_id'
+    _item.category_id              mdcif_mode_origin
+    _item.mandatory_code           yes
+    _item_type.code                int
+    _item_linked.child_name        '_mdcif_mode_origin.mode_set_id'
+    _item_linked.parent_name       '_mdcif_mode_set.id'
+    save_
+
+save__mdcif_mode_origin.atom_id
+    _item_description.description  'The atom (in the mode set model) this mean position belongs to.'
+    _item.name                     '_mdcif_mode_origin.atom_id'
+    _item.category_id              mdcif_mode_origin
+    _item.mandatory_code           yes
+    _item_type.code                code
+    _item_linked.child_name        '_mdcif_mode_origin.atom_id'
+    _item_linked.parent_name       '_atom_site.id'
+    save_
+
+save__mdcif_mode_origin.x
+    _item_description.description  'Mean X coordinate, in angstroms, in the frame of the deposited models.'
+    _item.name                     '_mdcif_mode_origin.x'
+    _item.category_id              mdcif_mode_origin
+    _item.mandatory_code           yes
+    _item_type.code                float
+    save_
+
+save__mdcif_mode_origin.y
+    _item_description.description  'Mean Y coordinate, in angstroms, in the frame of the deposited models.'
+    _item.name                     '_mdcif_mode_origin.y'
+    _item.category_id              mdcif_mode_origin
+    _item.mandatory_code           yes
+    _item_type.code                float
+    save_
+
+save__mdcif_mode_origin.z
+    _item_description.description  'Mean Z coordinate, in angstroms, in the frame of the deposited models.'
+    _item.name                     '_mdcif_mode_origin.z'
+    _item.category_id              mdcif_mode_origin
+    _item.mandatory_code           yes
+    _item_type.code                float
+    save_
+
+##############################################################################
+#                            MDCIF_PROJECTION                                #
+##############################################################################
+
+save_mdcif_projection
+    _category.description
+;   Coordinates of analysed trajectory frames along modes 1-3 of the global
+    mode set, with the deposited model whose cluster each frame belongs to.
+    Enough to redraw the conformational landscape and the clusters from the
+    file alone. May hold a regular subsample of the frames.
+;
+    _category.id                  mdcif_projection
+    _category.mandatory_code      no
+    _category_key.name            '_mdcif_projection.id'
+    loop_
+    _category_group.id            'inclusive_group'
+    save_
+
+save__mdcif_projection.id
+    _item_description.description  'Unique identifier for the projected frame.'
+    _item.name                     '_mdcif_projection.id'
+    _item.category_id              mdcif_projection
+    _item.mandatory_code           yes
+    _item_type.code                int
+    save_
+
+save__mdcif_projection.mode_set_id
+    _item_description.description  'The (global) mode set the frame is projected on.'
+    _item.name                     '_mdcif_projection.mode_set_id'
+    _item.category_id              mdcif_projection
+    _item.mandatory_code           yes
+    _item_type.code                int
+    _item_linked.child_name        '_mdcif_projection.mode_set_id'
+    _item_linked.parent_name       '_mdcif_mode_set.id'
+    save_
+
+save__mdcif_projection.frame
+    _item_description.description  '0-based index of the frame in the (concatenated) trajectory.'
+    _item.name                     '_mdcif_projection.frame'
+    _item.category_id              mdcif_projection
+    _item.mandatory_code           yes
+    _item_type.code                int
+    save_
+
+save__mdcif_projection.time
+    _item_description.description  'Simulation time of the frame in picoseconds.'
+    _item.name                     '_mdcif_projection.time'
+    _item.category_id              mdcif_projection
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_
+
+save__mdcif_projection.model_id
+    _item_description.description
+;   The deposited model representing the cluster this frame belongs to;
+    "." if the frame is noise or its cluster was not deposited.
+;
+    _item.name                     '_mdcif_projection.model_id'
+    _item.category_id              mdcif_projection
+    _item.mandatory_code           no
+    _item_type.code                int
+    _item_linked.child_name        '_mdcif_projection.model_id'
+    _item_linked.parent_name       '_ihm_model_list.model_id'
+    save_
+
+save__mdcif_projection.proj_1
+    _item_description.description  'Coordinate along mode 1, (x - origin) . v_1, in angstroms.'
+    _item.name                     '_mdcif_projection.proj_1'
+    _item.category_id              mdcif_projection
+    _item.mandatory_code           yes
+    _item_type.code                float
+    save_
+
+save__mdcif_projection.proj_2
+    _item_description.description  'Coordinate along mode 2, in angstroms.'
+    _item.name                     '_mdcif_projection.proj_2'
+    _item.category_id              mdcif_projection
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_
+
+save__mdcif_projection.proj_3
+    _item_description.description  'Coordinate along mode 3, in angstroms.'
+    _item.name                     '_mdcif_projection.proj_3'
+    _item.category_id              mdcif_projection
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_

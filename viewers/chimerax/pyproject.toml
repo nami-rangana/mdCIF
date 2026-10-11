@@ -1,0 +1,54 @@
+# ChimeraX bundle for mdcif files.
+# Install for development from the ChimeraX command line:
+#   devel install <path to mdcif>/viewers/chimerax
+
+[build-system]
+requires = ["setuptools", "ChimeraX-BundleBuilder"]
+build-backend = "chimerax.bundle_builder.cx_pep517"
+
+[project]
+name = "ChimeraX-MDCIF"
+license = { text = "MIT" }
+authors = [{ name = "The mdcif authors" }]
+description = "Read mdcif files: switch between MD cluster models, animate essential modes, draw porcupine plots"
+dependencies = ["ChimeraX-Core ~=1.0"]
+dynamic = ["classifiers", "requires-python", "version"]
+
+[project.readme]
+content-type = "text"
+text = """Viewer for mdcif files (MD trajectories summarized as PDB-IHM-compatible
+mmCIF): switch between cluster representatives, animate each model along its
+own PCA / quasi-harmonic modes, and draw porcupine plots."""
+
+[tool.setuptools.dynamic]
+version = { attr = "src.__version__" }
+
+[tool.chimerax]
+min-session-version = 1
+max-session-version = 1
+categories = ["Structure Analysis"]
+classifiers = ["Development Status :: 2 - Pre-Alpha"]
+
+[tool.chimerax.command.mdcif]
+category = "Structure Analysis"
+description = "Report mdcif bundle status"
+
+[tool.chimerax.command."mdcif open"]
+category = "Structure Analysis"
+description = "Open an mdcif file and read its essential modes"
+
+[tool.chimerax.command."mdcif modes"]
+category = "Structure Analysis"
+description = "List the essential modes stored for each model"
+
+[tool.chimerax.command."mdcif morph"]
+category = "Structure Analysis"
+description = "Morph through the cluster representative models"
+
+[tool.chimerax.command."mdcif animate"]
+category = "Structure Analysis"
+description = "Animate a model along one of its essential modes"
+
+[tool.chimerax.command."mdcif porcupine"]
+category = "Structure Analysis"
+description = "Draw porcupine arrows for one mode of a model"

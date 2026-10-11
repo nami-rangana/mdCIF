@@ -1,0 +1,30 @@
+# Runs the test suite on every push and pull request. The suite includes full validation of
+# built mdcif files against the PDBx, IHM and mdcif_ext dictionaries
+# (tests/test_pipeline.py::test_validate_against_dictionaries).
+name: tests
+
+on:
+  push:               # every push, any branch (to limit: branches: [main, v1])
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}    # login shell, so the conda env is active in every step
+    env:
+      OMP_NUM_THREADS: "2"     # runners have few cores; avoid BLAS oversubscription
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment.yml
+          cache-environment: true    # first run solves/installs, later runs reuse it
+
+      - name: Install mdcif
+        run: pip install -e . --no-deps   # editable: validate.py reads docs/spec/mdcif_ext.dic
+
+      - name: Tests (incl. PDBx + IHM + mdcif_ext validation)
+        run: pytest -q
