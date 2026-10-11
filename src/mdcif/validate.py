@@ -1,12 +1,13 @@
 """Validate mdcif files against PDBx + IHM + the mdcif extension dictionary.
 
-Loads mmcif_pdbx_v50.dic and mmcif_ihm.dic (downloaded once from
-mmcif.wwpdb.org and cached) and docs/spec/mdcif_ext.dic with
-``ihm.dictionary.read``, combines them, and runs the combined dictionary's
-validator on the file. Also checks mdcif-specific rules the dictionary can't
-express (unit-length vectors, one vector row per selected atom, mode_index
-order matching eigenvalue order, consistent variance fractions, orthonormal
-global modes with an origin, projections pointing at existing models).
+Loads mmcif_pdbx_v50.dic (from mmcif.wwpdb.org) and mmcif_ihm.dic (from
+IHMCIF on GitHub), downloaded once per python-ihm version and cached, plus
+docs/spec/mdcif_ext.dic, with ``ihm.dictionary.read``; combines them and runs
+the combined dictionary's validator on the file. Also checks mdcif-specific
+rules the dictionary can't express (unit-length vectors, one vector row per
+selected atom, mode_index order matching eigenvalue order, consistent variance
+fractions, orthonormal global modes with an origin, projections pointing at
+existing models).
 """
 
 import os
@@ -15,9 +16,12 @@ from pathlib import Path
 
 import numpy as np
 
+# IHM comes from IHMCIF's dist/, the dictionary python-ihm writes against: the copy on
+# mmcif.wwpdb.org can lag a release behind (python-ihm 2.12 writes
+# _pdbx_poly_seq_scheme.ihm_model_id_list, new in IHM 1.29, while wwpdb still had 1.28).
 DICTIONARY_URLS = {
     "mmcif_pdbx_v50.dic": "https://mmcif.wwpdb.org/dictionaries/ascii/mmcif_pdbx_v50.dic",
-    "mmcif_ihm.dic": "https://mmcif.wwpdb.org/dictionaries/ascii/mmcif_ihm.dic",
+    "mmcif_ihm.dic": "https://raw.githubusercontent.com/ihmwg/IHMCIF/master/dist/mmcif_ihm.dic",
 }
 EXTENSION_DICTIONARY = Path(__file__).resolve().parents[2] / "docs" / "spec" / "mdcif_ext.dic"
 
@@ -38,8 +42,13 @@ def cache_dir():
 
 
 def _dictionary(name):
-    path = cache_dir() / name
+    import ihm
+
+    # one copy per python-ihm version: a newer python-ihm may write items that only a newer
+    # dictionary defines, so a cached older one must not be reused after an upgrade
+    path = cache_dir() / f"python-ihm-{ihm.__version__}" / name
     if not path.exists():
+        path.parent.mkdir(exist_ok=True)
         with urllib.request.urlopen(DICTIONARY_URLS[name], timeout=300) as r:
             path.write_bytes(r.read())
     return path
