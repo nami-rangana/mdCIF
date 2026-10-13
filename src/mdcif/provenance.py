@@ -50,12 +50,11 @@ class Provenance:
     title: str = ""
     authors: list[str] = field(default_factory=list)
     trajectory_doi: str = ""
-    trajectory_url: str = ""
     trajectory_database: str = ""   # e.g. "MDposit" when there is no DOI
     trajectory_accession: str = ""  # accession in that database
     name: str = ""
     source_structure: str = ""      # PDB ID the simulation started from
-    reference_structure: str = ""   # experimental PDB entry used as reference (see reference.py)
+    reference_PDB_id: str = ""      # experimental PDB entry used as reference (see reference.py)
     composition: str = ""
     frames_used: str = ""
     alignment_selection: str = "name CA"
@@ -89,11 +88,11 @@ def provenance_to_dict(prov: Provenance) -> dict:
     """Inverse of :func:`provenance_from_dict` (the YAML template layout)."""
     return {
         "dataset": {"title": prov.title, "authors": list(prov.authors),
-                    "trajectory_doi": prov.trajectory_doi, "trajectory_url": prov.trajectory_url,
+                    "trajectory_doi": prov.trajectory_doi,
                     "trajectory_database": prov.trajectory_database,
                     "trajectory_accession": prov.trajectory_accession},
         "system": {"name": prov.name, "source_structure": prov.source_structure,
-                   "reference_structure": prov.reference_structure,
+                   "reference_PDB_id": prov.reference_PDB_id,
                    "composition": prov.composition},
         "simulation": dataclasses.asdict(prov.simulation),
         "analysis": {"frames_used": prov.frames_used,

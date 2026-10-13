@@ -217,14 +217,13 @@ def build_system(atoms, model_coords, clusters, mode_sets, provenance, mode_atom
             ihm.location.PDBLocation(prov.source_structure.upper()),
             details="Starting structure of the simulation"))
     if prov.trajectory_doi:
-        repo = ihm.location.Repository(doi=prov.trajectory_doi, url=prov.trajectory_url or None)
+        repo = ihm.location.Repository(doi=prov.trajectory_doi)
         datasets.append(MDTrajectoryDataset(
             ihm.location.InputFileLocation(None, repo=repo, details="Full MD trajectory"),
             details="Full MD trajectory"))
     elif prov.trajectory_accession:
-        loc = ihm.location.DatabaseLocation(
-            prov.trajectory_accession,
-            details=" ".join(x for x in (prov.trajectory_database, prov.trajectory_url) if x))
+        loc = ihm.location.DatabaseLocation(prov.trajectory_accession,
+                                            details=prov.trajectory_database or None)
         datasets.append(MDTrajectoryDataset(loc, details="Full MD trajectory"))
     dgroup = ihm.dataset.DatasetGroup(datasets, name="Simulation inputs")
 

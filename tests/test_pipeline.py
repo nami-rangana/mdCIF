@@ -174,12 +174,12 @@ def test_anm_modes_keep_soft_modes_of_extended_chain():
 def test_provenance_dict_round_trip():
     prov = provenance_from_dict({
         "dataset": {"title": "t", "authors": ["A, B."], "trajectory_accession": "MD-X"},
-        "system": {"name": "n", "source_structure": "1ABC", "reference_structure": "2ABC"},
+        "system": {"name": "n", "source_structure": "1ABC", "reference_PDB_id": "2ABC"},
         "simulation": {"engine": "GROMACS", "temperature_K": 300, "unknown_key": 1},
         "modes": {"n_modes": 5},
     })
     assert prov.simulation.temperature_K == 300 and prov.modes.n_modes == 5
-    assert prov.reference_structure == "2ABC"
+    assert prov.reference_PDB_id == "2ABC"
     assert provenance_from_dict(provenance_to_dict(prov)) == prov
 
 

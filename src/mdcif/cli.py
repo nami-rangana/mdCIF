@@ -74,7 +74,7 @@ def build(
                           selection=selection, deposit_selection=deposit_selection, start=start,
                           stop=stop, step=step, traj_format=traj_format, n_modes=n_modes,
                           mass_weighted=mass_weighted, max_models=max_models,
-                          reference=reference or prov.reference_structure or None,
+                          reference=reference or prov.reference_PDB_id or None,
                           max_projection_points=max_projection_points, anm=anm)
     typer.echo(summary.report())
 
