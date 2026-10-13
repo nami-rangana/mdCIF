@@ -305,7 +305,9 @@ def build_system(atoms, model_coords, clusters, mode_sets, provenance, mode_atom
     for c in range(n_models):
         if c < len(mode_sets) and mode_sets[c] is not None:
             sets.append(("cluster", models[c], ensembles[c], mode_sets[c], False,
-                         f"frames of cluster {c + 1} superposed on its medoid"))
+                         f"frames of cluster {c + 1} superposed on its medoid"
+                         + ("; mass-weighted with standard element masses"
+                            if mode_sets[c].mass_weighted else "")))
     system._mdcif = {"simulation": sim, "protocol": protocol, "engine": engine_sw,
                      "mode_sets": sets, "mode_atoms": np.asarray(mode_atoms, dtype=int),
                      "projection": projection, "models": models}
@@ -372,16 +374,18 @@ class _ModeDumper(ihm.dumper.Dumper):
         rows = []
         with writer.loop("_mdcif_mode", [
                 "id", "mode_set_id", "mode_index", "eigenvalue", "variance_fraction",
-                "cumulative_variance_fraction"]) as lp:
+                "cumulative_variance_fraction", "cartesian_variance"]) as lp:
             mode_id = 0
             for set_id, (_, model, _, ms, _, _) in enumerate(info["mode_sets"], 1):
                 cum = ms.cumulative_variance_fraction
+                cart = ms.cartesian_variance
                 for i in range(ms.n_modes):
                     mode_id += 1
                     lp.write(id=mode_id, mode_set_id=set_id, mode_index=i + 1,
                              eigenvalue=fmt(ms.eigenvalues[i]),
                              variance_fraction=fmt(ms.variance_fraction[i]),
-                             cumulative_variance_fraction=fmt(cum[i]))
+                             cumulative_variance_fraction=fmt(cum[i]),
+                             cartesian_variance=fmt(cart[i]) if cart is not None else None)
                     rows.append((mode_id, offsets[id(model)], ms.eigenvectors[i]))
         with writer.loop("_mdcif_mode_vector", ["mode_id", "atom_id", "dx", "dy", "dz"]) as lp:
             for mode_id, offset, vec in rows:

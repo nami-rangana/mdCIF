@@ -7,9 +7,12 @@ sync - tests/test_viewers.py checks that they are identical.
 Reads text mmCIF only (not BinaryCIF). Atoms are matched between the file and the
 viewer by (auth chain ID, auth residue number, atom name), as strings.
 
-Display conventions (docs/spec/mdcif_spec.md): displacement = k * sqrt(lambda) * v,
-k in standard deviations. Atoms without their own vector component (side chains
-when the modes are on CA atoms) move with the vector of their residue's mode atom.
+Display conventions (docs/spec/mdcif_spec.md): displacement = k * sigma * v, k in
+standard deviations, sigma = sqrt(_mdcif_mode.cartesian_variance) in angstroms
+(= sqrt(eigenvalue) for unweighted PCA; the writer has already taken the masses
+out for mass-weighted modes, whose eigenvalues are in amu * angstrom^2). Atoms
+without their own vector component (side chains when the modes are on CA atoms)
+move with the vector of their residue's mode atom.
 """
 
 import numpy as np
@@ -125,10 +128,12 @@ class ModeSet:
         self.scope = info.get("scope") or "cluster"
         self.model = int(info["model_id"])
         self.method = info.get("method") or "PCA"
+        self.mass_weighted = (info.get("mass_weighted") or "NO").upper() == "YES"
         self.selection = info.get("atom_selection") or ""
         self.n_frames = int(info["num_frames"]) if info.get("num_frames") else None
         self.eigenvalues = np.zeros(0)
         self.variance_fraction = np.zeros(0)
+        self.cartesian_variance = np.zeros(0)   # angstrom^2, NaN if not in the file
         self.keys = []                          # atom key of every vector component
         self.vectors = np.zeros((0, 0, 3))      # (n_modes, n_atoms, 3)
         self.origin = None                      # (n_atoms, 3) for the global set
@@ -137,12 +142,30 @@ class ModeSet:
     def n_modes(self):
         return len(self.eigenvalues)
 
+    def sigma(self, mode_index):
+        """One standard deviation of the motion along mode ``mode_index`` (1-based), in A."""
+        if not 1 <= mode_index <= self.n_modes:
+            raise ValueError(f"mode {mode_index} not in 1..{self.n_modes}")
+        var = self.cartesian_variance[mode_index - 1]
+        if np.isnan(var):
+            if self.mass_weighted:
+                raise ValueError(f"mode set {self.id}: mass-weighted modes without "
+                                 "_mdcif_mode.cartesian_variance; rebuild the file")
+            var = self.eigenvalues[mode_index - 1]
+        return float(np.sqrt(max(var, 0.0)))
+
     def summary(self):
         var = "/".join(f"{100 * v:.0f}" for v in self.variance_fraction)
         ev = "/".join(f"{v:.3g}" for v in self.eigenvalues)
+        unit = "amu A^2" if self.mass_weighted else "A^2"
+        try:
+            size = ", sd " + "/".join(f"{self.sigma(i):.2g}"
+                                      for i in range(1, self.n_modes + 1)) + " A"
+        except ValueError:
+            size = ""
         return (f"{self.scope} set {self.id}: {self.n_modes} {self.method} modes on "
                 f"{len(self.keys)} atoms ({self.selection}), {self.n_frames} frames, "
-                f"eigenvalues {ev} A^2, variance {var}%")
+                f"eigenvalues {ev} {unit}{size}, variance {var}%")
 
 
 class MdcifFile:
@@ -185,17 +208,21 @@ class MdcifFile:
         modes = t.get("_mdcif_mode", {})
         mode_of = {}                            # mode id -> (set id, mode index)
         per_set = {}
-        for mid, sid, idx, ev, vf in zip(modes.get("id", []), modes.get("mode_set_id", []),
-                                         modes.get("mode_index", []),
-                                         modes.get("eigenvalue", []),
-                                         modes.get("variance_fraction", []), strict=True):
-            per_set.setdefault(int(sid), []).append((int(idx), mid, float(ev),
-                                                     np.nan if vf is None else float(vf)))
+        n = len(modes.get("id", []))
+        for mid, sid, idx, ev, vf, cv in zip(modes.get("id", []),
+                                             modes.get("mode_set_id", []),
+                                             modes.get("mode_index", []),
+                                             modes.get("eigenvalue", []),
+                                             _floats(modes.get("variance_fraction", [None] * n)),
+                                             _floats(modes.get("cartesian_variance", [None] * n)),
+                                             strict=True):
+            per_set.setdefault(int(sid), []).append((int(idx), mid, float(ev), vf, cv))
         for sid, rows in per_set.items():
             rows.sort()
             ms = sets[sid]
             ms.eigenvalues = np.array([r[2] for r in rows])
             ms.variance_fraction = np.array([r[3] for r in rows])
+            ms.cartesian_variance = np.array([r[4] for r in rows])
             for k, r in enumerate(rows):
                 mode_of[r[1]] = (sid, k)
         vec = t.get("_mdcif_mode_vector", {})
@@ -299,9 +326,9 @@ def displacements(keys, ms, mode_index):
 
 
 def mode_frames(coords, keys, ms, mode_index, amplitude=3.0, n_frames=30):
-    """``(n_frames, n, 3)`` coordinates oscillating along a mode: x0 + k sqrt(l) sin(phase) d."""
+    """``(n_frames, n, 3)`` coordinates oscillating along a mode: x0 + k sigma sin(phase) d."""
     d, _ = displacements(keys, ms, mode_index)
-    sigma = np.sqrt(max(ms.eigenvalues[mode_index - 1], 0.0))
+    sigma = ms.sigma(mode_index)
     phase = np.sin(2 * np.pi * np.arange(n_frames) / n_frames)
     return np.asarray(coords, float)[None] + amplitude * sigma * phase[:, None, None] * d[None]
 
@@ -321,11 +348,12 @@ def morph_frames(model_coords, steps=10, wrap=True):
 def arrows(coords, keys, ms, mode_index, scale=3.0, min_length=0.5):
     """Porcupine arrows ``(starts, ends)`` for atoms with their own vector component.
 
-    Arrow = scale * sqrt(lambda) * v_i (``scale`` in standard deviations); arrows
-    shorter than ``min_length`` angstroms are dropped.
+    Arrow = scale * sigma * v_i (``scale`` in standard deviations, sigma in
+    angstroms, see ``ModeSet.sigma``); arrows shorter than ``min_length``
+    angstroms are dropped.
     """
     d, own = displacements(keys, ms, mode_index)
-    vec = scale * np.sqrt(max(ms.eigenvalues[mode_index - 1], 0.0)) * d[own]
+    vec = scale * ms.sigma(mode_index) * d[own]
     start = np.asarray(coords, float)[own]
     keep = np.linalg.norm(vec, axis=1) >= min_length
     return start[keep], start[keep] + vec[keep]

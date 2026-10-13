@@ -10,7 +10,9 @@ Usage (models load as states of one object)::
     mdcif_porcupine gb1, model=1, mode=1        CGO arrows gb1_m1_mode1_porcupine
 
 ``amplitude`` / ``scale`` are in standard deviations of the mode (k in
-k * sqrt(lambda) * v). Self-contained: needs only PyMOL and numpy.
+k * sigma * v, sigma = sqrt(_mdcif_mode.cartesian_variance) in angstroms, which is
+sqrt(lambda) for unweighted PCA and has the masses taken out for quasi-harmonic
+modes). Self-contained: needs only PyMOL and numpy.
 """
 
 import os
@@ -111,7 +113,7 @@ def mdcif_animate(obj, model=1, mode=1, amplitude=3.0, frames=30, scope="cluster
 
 def mdcif_porcupine(obj, model=1, mode=1, scale=3.0, color="orange", scope="cluster",
                     min_length=0.5, radius=0.15):
-    """CGO arrows along one mode of one model (arrow = scale * sqrt(lambda) * v)."""
+    """CGO arrows along one mode of one model (arrow = scale * sigma * v)."""
     from pymol import cmd
     from pymol.cgo import CONE, CYLINDER
 

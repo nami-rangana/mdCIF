@@ -27,7 +27,7 @@ from .clustering import ClusterResult, clusters_from_labels, hdbscan_labels
 from .modes import ModeSet, anm_modes, cluster_modes, cumulative_overlap, project
 from .provenance import Provenance
 from .reference import load_reference, match_chains, reference_coordinates
-from .trajectory import apply_transform, load_universe, read_frames, superpose
+from .trajectory import apply_transform, element_masses, load_universe, read_frames, superpose
 from .writer import chain_layout, chain_sequences, write_mdcif
 
 DEFAULT_DEPOSIT_SELECTION = "protein and not name H* and not resname ACE NME NHE NH2"
@@ -261,7 +261,7 @@ def save_mdcif(output, traj: Trajectory, clusters: ClusterResult, provenance: Pr
     n_models = clusters.n_clusters if not max_models else min(max_models, clusters.n_clusters)
     reps = clusters.representatives[:n_models]
     model_coords = np.array([traj.deposit_coordinates(f) for f in reps])
-    masses = traj.analysis.masses if mass_weighted else None
+    masses = element_masses(traj.analysis) if mass_weighted else None  # not HMR masses
     min_frames = min_cluster_frames or max(10, n_modes + 1)
     mode_sets, overlaps = [], []
     for c, f in enumerate(reps):

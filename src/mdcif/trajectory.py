@@ -103,6 +103,32 @@ def read_frames(universe, selection, start=0, stop=None, step=1):
     return out, frames, times
 
 
+def element_masses(atoms):
+    """Standard atomic masses (amu) of an AtomGroup, from its elements.
+
+    Not the topology masses: hydrogen mass repartitioning (HMR) moves mass from
+    heavy atoms to their hydrogens (CA 9.99 instead of 12.01, 7.98 in Gly), which
+    changes the dynamics but not the sampled ensemble, so it must not change the
+    quasi-harmonic modes. Elements come from the topology (e.g. Amber's atomic
+    numbers), else are guessed from the atom names (e.g. PSF).
+    """
+    from MDAnalysis.exceptions import NoDataError
+    from MDAnalysis.guesser.default_guesser import DefaultGuesser
+    from MDAnalysis.guesser.tables import masses
+
+    table = {k.upper(): v for k, v in masses.items()}
+    try:
+        elements = atoms.elements
+    except NoDataError:
+        elements = [DefaultGuesser(None).guess_atom_element(n) for n in atoms.names]
+    out = np.array([table.get(str(e).strip().upper(), np.nan) for e in elements])
+    if np.isnan(out).any():
+        unknown = sorted({f"{a.name} ({e})" for a, e, m in zip(atoms, elements, out, strict=True)
+                          if np.isnan(m)})
+        raise ValueError(f"no standard mass for atoms {', '.join(unknown)}")
+    return out
+
+
 def superpose(coords, reference):
     """Superpose every frame of ``coords`` ``(n_frames, n_atoms, 3)`` onto ``reference``.
 

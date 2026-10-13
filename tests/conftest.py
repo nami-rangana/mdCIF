@@ -48,3 +48,18 @@ def adk_mdcif(adk_files, tmp_path_factory):
     summary = build_mdcif(*adk_files, Provenance(name="AdK test"), out, anm=False,
                           min_cluster_size=5)
     return out, summary
+
+
+@pytest.fixture(scope="session")
+def adk_mdcif_mw(adk_files, tmp_path_factory):
+    """mdcif file from AdK with mass-weighted (quasi-harmonic) cluster modes, 2 clusters by hand."""
+    import numpy as np
+
+    from mdcif.pipeline import build_mdcif
+    from mdcif.provenance import Provenance
+
+    out = tmp_path_factory.mktemp("mdcif") / "adk_qha.cif"
+    labels = (np.arange(98) >= 60).astype(int)  # closed half / open half of the transition
+    summary = build_mdcif(*adk_files, Provenance(name="AdK test"), out, labels=labels,
+                          method="by hand", mass_weighted=True)
+    return out, summary

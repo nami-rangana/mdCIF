@@ -6,8 +6,9 @@ docs/spec/mdcif_ext.dic, with ``ihm.dictionary.read``; combines them and runs
 the combined dictionary's validator on the file. Also checks mdcif-specific
 rules the dictionary can't express (unit-length vectors, one vector row per
 selected atom, mode_index order matching eigenvalue order, consistent variance
-fractions, orthonormal global modes with an origin, projections pointing at
-existing models).
+fractions, a Cartesian variance per mode (equal to the eigenvalue unless the set
+is mass-weighted), orthonormal global modes with an origin, projections pointing
+at existing models).
 """
 
 import os
@@ -81,6 +82,13 @@ def _check_mode_set(label, ms, tol):
         problems.append(f"{label}: variance fractions outside [0, 1]")
     if len(np.unique(ms.atom_indices)) != len(ms.atom_indices):
         problems.append(f"{label}: duplicate atoms in mode vectors")
+    cart = ms.cartesian_variance
+    if cart is None or not np.all(np.asarray(cart) >= 0):  # NaN fails too
+        problems.append(f"{label}: missing or negative _mdcif_mode.cartesian_variance"
+                        + (" (needed to display mass-weighted modes)" if ms.mass_weighted else ""))
+    elif not ms.mass_weighted and not np.allclose(cart, ms.eigenvalues, rtol=tol, atol=0):
+        problems.append(f"{label}: cartesian_variance differs from the eigenvalue of an "
+                        f"unweighted mode set")
     return problems
 
 

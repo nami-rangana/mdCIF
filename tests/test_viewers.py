@@ -86,17 +86,35 @@ def test_displacements_mode_frames_and_arrows(vdata, adk_mdcif):
     frames = vdata.mode_frames(xyz, keys, ms, 1, amplitude=2.0, n_frames=20)
     assert frames.shape == (20, len(keys), 3) and np.allclose(frames[0], xyz)
     peak = np.abs(frames - xyz).max()
-    assert peak == pytest.approx(2.0 * np.sqrt(ms.eigenvalues[0]) * np.abs(d).max(), rel=0.05)
+    assert ms.sigma(1) == pytest.approx(np.sqrt(ms.eigenvalues[0]))   # PCA: sqrt(lambda)
+    assert peak == pytest.approx(2.0 * ms.sigma(1) * np.abs(d).max(), rel=0.05)
     starts, ends = vdata.arrows(xyz, keys, ms, 1, scale=3.0, min_length=0.0)
     assert len(starts) == len(ms.keys)
     lengths = np.linalg.norm(ends - starts, axis=1)
-    assert np.sqrt((lengths ** 2).sum()) == pytest.approx(3.0 * np.sqrt(ms.eigenvalues[0]))
+    assert np.sqrt((lengths ** 2).sum()) == pytest.approx(3.0 * ms.sigma(1))
     va, na, ta = vdata.arrow_mesh(starts[:5], ends[:5], sides=8)
     assert va.shape == na.shape and ta.max() < len(va)
     assert np.allclose(np.linalg.norm(na, axis=1), 1.0, atol=1e-5)
     with pytest.raises(ValueError):
         vdata.displacements(keys, ms, ms.n_modes + 1)
 
+
+
+def test_mass_weighted_modes_are_drawn_in_angstrom(vdata, adk_mdcif_mw):
+    """Quasi-harmonic sets: arrows use cartesian_variance (A^2), not the amu A^2 eigenvalue."""
+    f = vdata.MdcifFile(adk_mdcif_mw[0])
+    ms = f.cluster_set(1)
+    assert ms.mass_weighted and not f.global_set.mass_weighted
+    assert "amu A^2" in ms.summary()
+    keys = f.model_keys[1]
+    xyz = np.zeros((len(keys), 3))
+    starts, ends = vdata.arrows(xyz, keys, ms, 1, scale=3.0, min_length=0.0)
+    rms = np.sqrt((np.linalg.norm(ends - starts, axis=1) ** 2).sum())
+    assert rms == pytest.approx(3.0 * np.sqrt(ms.cartesian_variance[0]), rel=1e-5)
+    assert rms == pytest.approx(3.0 * np.sqrt(ms.eigenvalues[0] / 12.011), rel=1e-5)  # CA only
+    ms.cartesian_variance[:] = np.nan          # as in a file without the item
+    with pytest.raises(ValueError, match="rebuild"):
+        vdata.arrows(xyz, keys, ms, 1)
 
 def test_morph_frames(vdata):
     a, b = np.zeros((4, 3)), np.ones((4, 3))

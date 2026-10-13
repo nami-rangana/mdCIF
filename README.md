@@ -1,7 +1,7 @@
 # mdcif — a shareable mmCIF object for MD trajectories
 
 > Status: **pre-alpha**. The core pipeline (`mdcif build | info | validate | landscape`) works
-> end to end (format draft v0.2); the PyMOL plugin works and is tested; the ChimeraX bundle is
+> end to end (format draft v0.3); the PyMOL plugin works and is tested; the ChimeraX bundle is
 > implemented but has not yet been run inside ChimeraX.
 
 The PDB works because everyone shares one object (PDB / mmCIF) without needing to know how it
@@ -10,8 +10,9 @@ use outside the MD community. Cluster centroids are easy to share but lose the d
 
 **mdcif** packages an MD simulation into a single, PDB-IHM-compatible mmCIF file containing:
 
-1. **Models** — the medoids of the main clusters (multi-model `atom_site`). Frames are
-   clustered with HDBSCAN on their projections onto the top 3 global PCs.
+1. **Models** — the medoids of the main clusters (multi-model `atom_site`). By default the
+   frames are clustered with HDBSCAN on their projections onto the top 3 global PCs; any other
+   clustering can be used instead (a scikit-learn-style estimator, or labels from any tool).
 2. **Provenance** — simulation engine, force field and conditions, plus how clustering and PCA
    were done (existing PDBx/IHM categories wherever possible, a small `_mdcif_` extension otherwise).
    Given a PDB entry of the same molecule (`--reference 3GB1`), the file reuses its entity,
@@ -40,7 +41,7 @@ See [docs/proposal.md](docs/proposal.md) for goals and milestones and
 | `viewers/chimerax/` | ChimeraX bundle `ChimeraX-MDCIF` (`mdcif ...` commands) |
 | `viewers/pymol/mdcif_pymol/` | PyMOL plugin (`mdcif_*` commands) |
 | `docs/spec/` | Format spec, IHM/PDBx category mapping, DDL2 extension dictionary |
-| `examples/` | Provenance template, 3GB1 MELD example, notebooks; `examples/data/` holds local data (git-ignored) |
+| `examples/` | Provenance template; 3GB1 MELD example with a walkthrough notebook; `examples/data/` holds local data (git-ignored) |
 | `tests/` | pytest suite; small fixtures in `tests/data/` |
 | `scripts/` | One-off utilities |
 
@@ -65,10 +66,6 @@ conda activate mdcif
 ```
 
 ```bash
-pip install --no-deps -r requirements-pip.txt
-```
-
-```bash
 pip install -e . --no-deps
 ```
 
@@ -76,21 +73,24 @@ pip install -e . --no-deps
 pytest
 ```
 
-`requirements-pip.txt` adds MDANCE (optional k-means NANI clustering) and its PyTorch
-dependency, which conda-forge can't provide here. The default HDBSCAN clustering only needs
-scikit-learn. `mdcif` is installed in editable mode, so code changes take effect without
-reinstalling. Always use `--no-deps`: conda provides all other dependencies, and letting pip
-re-resolve them makes it try to compile ProDy from source on Windows. After editing
+`mdcif` is installed in editable mode, so code changes take effect without reinstalling. Always
+use `--no-deps`: conda provides every dependency and pip must not replace them. After editing
 `environment.yml`, run `mamba env update -f environment.yml --prune`.
 
-On Windows with **Smart App Control** on, conda-forge's scipy and scikit-learn DLLs are blocked;
-replace them with the PyPI wheels as described at the top of `requirements-pip.txt`. The env sets
-`MKL_THREADING_LAYER=TBB` because conda-forge MKL's default threading layer crashes on win-64.
+On Windows with **Smart App Control** on, conda-forge's scipy and scikit-learn DLLs are blocked
+("An Application Control policy has blocked this file"); replace them with the PyPI wheels of
+the same versions:
 
-On Linux (e.g. HiPerGator) the same steps work, with two differences: install torch from the
-CPU index (`pip install --no-deps torch --index-url https://download.pytorch.org/whl/cpu`)
-before the rest of `requirements-pip.txt`, and clear `PYTHONPATH` if a module (such as Amber's)
-puts another Python's site-packages on it. Run trajectory analyses on a compute node
+```bash
+conda remove -n mdcif --force scipy scikit-learn
+pip install --no-deps scipy==1.17.1 scikit-learn==1.9.1
+```
+
+The env sets `MKL_THREADING_LAYER=TBB` because conda-forge MKL's default threading layer crashes
+on win-64.
+
+On Linux (e.g. HiPerGator) the same steps work; clear `PYTHONPATH` if a module (such as Amber's)
+puts another Python's site-packages on it, and run trajectory analyses on a compute node
 (`srun ...`), not a login node.
 
 ### Quick run
@@ -104,10 +104,25 @@ mdcif landscape gb1.cif
 ```
 
 Useful `mdcif build` options: `--start/--stop/--step` (frame range, e.g. skip equilibration),
-`--min-cluster-size`, `--cluster-selection eom|leaf` (HDBSCAN), `--max-models`,
-`--method nani|kmeans --n-clusters k` (k-means instead of HDBSCAN), `--reference <PDB ID or
-mmCIF>`, `--max-projection-points`, `--format` (if the trajectory format can't be guessed;
-Amber `name.nc.001` is recognised).
+`--min-cluster-size`, `--cluster-selection eom|leaf` (HDBSCAN), `--max-models`, `--reference
+<PDB ID or mmCIF>`, `--max-projection-points`, `--anm` (compare each cluster's modes with ANM
+modes of its medoid), `--format` (if the trajectory format can't be guessed; Amber
+`name.nc.001` is recognised).
+
+**Your own clustering.** Save one integer label per analysed frame (after `--start/--stop/
+--step`, `-1` = noise) and pass `--labels labels.npy --labels-method "name"`; or, in Python:
+
+```python
+from mdcif.pipeline import cluster, load_trajectory, save_mdcif
+traj = load_trajectory(top, traj_files, start=25000, step=10)   # read, superpose, global PCA
+clusters = cluster(traj, AnyEstimator(...))      # fit_predict on PCs 1-3; or labels=..., or none
+save_mdcif("out.cif", traj, clusters, provenance, reference="3GB1")
+```
+
+The walkthrough notebook [examples/3gb1/mdcif_3gb1.ipynb](examples/3gb1/mdcif_3gb1.ipynb) does
+this step by step on the GB1 MELD run, in plain language: PCA, clusters and medoids, the
+modes of each cluster, and a tour of the six new `_mdcif_` categories, with publication-style
+figures.
 
 ### 3. Initialize git
 
@@ -165,9 +180,10 @@ Or install it permanently via *Plugin → Plugin Manager → Install New Plugin*
 
 ## Data
 
-Trajectories are never committed (see `.gitignore`). Tests and notebooks use the small public
-adenylate kinase (AdK) trajectories shipped with `MDAnalysisTests`. Put any other local data in
-`examples/data/`.
+Trajectories are never committed (see `.gitignore`). Tests use the small public adenylate
+kinase (AdK) trajectories shipped with `MDAnalysisTests`; the notebook uses the GB1 MELD replica
+in `examples/data/3gb1/` (see [examples/3gb1/](examples/3gb1/README.md)). Put any other local
+data in `examples/data/`.
 
 ## License
 

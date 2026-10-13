@@ -11,7 +11,7 @@ _datablock.description
 
 _dictionary.title             mdcif_ext.dic
 _dictionary.datablock_id      mdcif_ext.dic
-_dictionary.version           0.0.2
+_dictionary.version           0.0.3
 
 loop_
 _dictionary_history.version
@@ -21,6 +21,10 @@ _dictionary_history.revision
 0.0.2 2026-10-06
 ;   Mode sets (global + per cluster): new mdcif_mode_set, mdcif_mode_origin,
     mdcif_projection; mdcif_mode now points at a mode set.
+;
+0.0.3 2026-10-13
+;   New mdcif_mode.cartesian_variance: display amplitude in square angstroms,
+    also for mass-weighted (quasi-harmonic) modes.
 ;
 
 ##############################################################################
@@ -333,7 +337,8 @@ save__mdcif_mode.mode_index
 save__mdcif_mode.eigenvalue
     _item_description.description
 ;   Eigenvalue of the mode: variance along the mode in square angstroms
-    (amu * square angstroms if the set is mass-weighted).
+    (amu * square angstroms if the set is mass-weighted). For the size of the
+    motion in angstroms use cartesian_variance.
 ;
     _item.name                     '_mdcif_mode.eigenvalue'
     _item.category_id              mdcif_mode
@@ -352,6 +357,21 @@ save__mdcif_mode.variance_fraction
 save__mdcif_mode.cumulative_variance_fraction
     _item_description.description  'Fraction (0-1) of the total variance explained by modes 1..mode_index.'
     _item.name                     '_mdcif_mode.cumulative_variance_fraction'
+    _item.category_id              mdcif_mode
+    _item.mandatory_code           no
+    _item_type.code                float
+    save_
+
+save__mdcif_mode.cartesian_variance
+    _item_description.description
+;   Variance, in square angstroms, of the Cartesian displacement along the
+    unit vector of the mode (mdcif_mode_vector): one standard deviation of
+    the motion is sqrt(cartesian_variance) times that vector. Equal to the
+    eigenvalue for unweighted PCA; eigenvalue / sum_j m_j |v_j|^2 for
+    mass-weighted modes (m_j standard atomic masses in amu, v_j the stored
+    components), so viewers need no masses.
+;
+    _item.name                     '_mdcif_mode.cartesian_variance'
     _item.category_id              mdcif_mode
     _item.mandatory_code           no
     _item_type.code                float

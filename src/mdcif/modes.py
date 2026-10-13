@@ -5,7 +5,9 @@ its top modes are the axes the frames are clustered on. For each cluster,
 frames are aligned to the cluster representative, the covariance matrix of the
 selected atoms is diagonalized, and the top ``k`` eigenvectors are kept.
 Vectors are stored as unit-length Cartesian displacements in the frame of the
-deposited models (see docs/spec/mdcif_spec.md).
+deposited models (see docs/spec/mdcif_spec.md), with the variance of the motion
+along each of them in square angstroms (``cartesian_variance``; the eigenvalue
+itself is in amu * square angstroms for mass-weighted, quasi-harmonic modes).
 """
 
 from dataclasses import dataclass
@@ -27,6 +29,13 @@ class ModeSet:
     n_frames: int
     origin: np.ndarray | None = None      # (n_atoms, 3) mean structure the modes are about
     total_variance: float | None = None   # trace of the covariance matrix
+    # (k,) angstrom^2: variance of the Cartesian motion along each unit vector, the display
+    # amplitude (= eigenvalues unless mass_weighted)
+    cartesian_variance: np.ndarray | None = None
+
+    def __post_init__(self):
+        if self.cartesian_variance is None and not self.mass_weighted:
+            self.cartesian_variance = np.asarray(self.eigenvalues, dtype=np.float64)
 
     @property
     def n_modes(self):
@@ -44,6 +53,10 @@ def cluster_modes(coords, n_modes=3, masses=None, reference=None, selection="nam
     normally the cluster representative) is given, frames are first superposed
     on it so the modes are expressed in the representative's frame. The sign of
     each vector is fixed so that its largest component is positive.
+
+    Mass-weighted eigenvectors ``u`` are returned as Cartesian unit vectors
+    ``v ~ M^-1/2 u``; the variance of the Cartesian motion along ``v`` is then
+    ``lambda / sum_j m_j |v_j|^2`` (``cartesian_variance``, angstrom^2).
     """
     coords = np.asarray(coords, dtype=np.float64)
     if reference is not None:
@@ -67,6 +80,7 @@ def cluster_modes(coords, n_modes=3, masses=None, reference=None, selection="nam
     if w is not None:
         vecs = vecs / w
     vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
+    cart = evals if w is None else evals / (vecs ** 2 @ w ** 2)
     # sign is arbitrary (spec); fixed so the output does not depend on solver or LAPACK build
     vecs *= np.sign(vecs[np.arange(len(vecs)), np.abs(vecs).argmax(axis=1)])[:, None]
     return ModeSet(
@@ -79,6 +93,7 @@ def cluster_modes(coords, n_modes=3, masses=None, reference=None, selection="nam
         n_frames=n_frames,
         origin=mean.reshape(n_atoms, 3) / (w.reshape(n_atoms, 3) if w is not None else 1.0),
         total_variance=total,
+        cartesian_variance=cart,
     )
 
 

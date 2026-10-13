@@ -6,7 +6,7 @@ import pytest
 
 from mdcif.modes import cluster_modes, cumulative_overlap, overlap_matrix, project
 from mdcif.provenance import Provenance, provenance_from_dict, provenance_to_dict
-from mdcif.trajectory import apply_transform, guess_format, load_universe, superpose
+from mdcif.trajectory import apply_transform, element_masses, guess_format, load_universe, superpose
 
 
 def random_rotation(rng):
@@ -84,12 +84,53 @@ def test_cluster_modes_finds_dominant_direction():
 def test_mass_weighted_vectors_are_cartesian_unit_vectors():
     rng = np.random.default_rng(3)
     coords = rng.normal(size=(200, 10, 3))
-    ms = cluster_modes(coords, n_modes=2, masses=rng.uniform(1, 30, size=10))
+    masses = rng.uniform(1, 30, size=10)
+    ms = cluster_modes(coords, n_modes=2, masses=masses)
     assert ms.method == "quasi-harmonic" and ms.mass_weighted
     assert np.allclose(np.linalg.norm(ms.eigenvectors.reshape(2, -1), axis=1), 1.0)
     assert np.allclose(ms.origin, coords.mean(axis=0))
+    # eigenvalues in amu A^2; the Cartesian variance along each unit vector in A^2
+    assert np.allclose(ms.cartesian_variance,
+                       ms.eigenvalues / ((ms.eigenvectors ** 2).sum(axis=2) @ masses))
     with pytest.raises(ValueError):
         project(coords, ms)
+
+
+def test_uniform_masses_only_rescale_eigenvalues():
+    """CA-only modes: every weight is the same, so quasi-harmonic = PCA up to units."""
+    rng = np.random.default_rng(4)
+    coords = rng.normal(size=(150, 12, 3)) * rng.uniform(0.5, 3, size=(12, 3))
+    pca = cluster_modes(coords, n_modes=3)
+    qha = cluster_modes(coords, n_modes=3, masses=np.full(12, 12.011))
+    assert np.allclose(qha.eigenvectors, pca.eigenvectors, atol=1e-8)
+    assert np.allclose(qha.eigenvalues, 12.011 * pca.eigenvalues)
+    assert np.allclose(qha.cartesian_variance, pca.eigenvalues)
+    assert np.array_equal(pca.cartesian_variance, pca.eigenvalues)
+
+
+def test_mass_weighted_cartesian_variance_is_the_cartesian_amplitude():
+    """One motion of known size: the masses come out again in cartesian_variance."""
+    rng = np.random.default_rng(5)
+    mean = rng.normal(size=(8, 3)) * 5
+    d = rng.normal(size=24)
+    d /= np.linalg.norm(d)
+    a = rng.normal(size=600) * 2.0
+    coords = mean + (a[:, None] * d).reshape(-1, 8, 3) + rng.normal(size=(600, 8, 3)) * 0.01
+    ms = cluster_modes(coords, n_modes=1, masses=rng.uniform(1, 30, size=8))
+    assert abs(ms.eigenvectors[0].ravel() @ d) == pytest.approx(1.0, abs=1e-4)
+    assert ms.cartesian_variance[0] == pytest.approx(np.var(a, ddof=1), rel=1e-3)
+    assert ms.eigenvalues[0] > 2 * ms.cartesian_variance[0]  # amu A^2, not A^2
+
+
+def test_element_masses_ignore_repartitioned_topology_masses(adk_files):
+    import MDAnalysis as mda
+
+    u = mda.Universe(*adk_files)               # PSF: no elements, guessed from names
+    ca = u.select_atoms("name CA")
+    ca.masses = 9.994                          # as after hydrogen mass repartitioning
+    assert np.allclose(element_masses(ca), 12.011)
+    bb = u.select_atoms("resid 1 and name N CA C O")
+    assert np.allclose(element_masses(bb), [14.007, 12.011, 12.011, 15.999])
 
 
 @pytest.mark.parametrize("n_frames", [40, 400])  # fewer / more frames than 3N = 150
@@ -242,6 +283,23 @@ def test_build_and_read_round_trip(adk_files, tmp_path, suffix):
         assert {names[i] for i in read.atom_indices} == {"CA"}
     assert data.global_modes is not None and data.projection is not None
     assert check_modes(out) == []
+
+
+def test_mass_weighted_build_round_trip(adk_mdcif_mw):
+    from mdcif.reader import read_mdcif
+    from mdcif.validate import validate_mdcif
+
+    out, summary = adk_mdcif_mw
+    data = read_mdcif(out)
+    assert not data.global_modes.mass_weighted   # the clustering axes stay plain PCA
+    for c, (_, ms) in enumerate(sorted(data.mode_sets.items())):
+        written = summary.mode_sets[c]
+        assert ms.mass_weighted and ms.method == "quasi-harmonic"
+        assert np.allclose(ms.cartesian_variance, written.cartesian_variance, rtol=1e-5)
+        # CA atoms only, all 12.011 amu: the masses only change the units
+        assert np.allclose(ms.cartesian_variance, ms.eigenvalues / 12.011, rtol=1e-5)
+        assert "mass-weighted" in data.mode_set_info[c + 2]["details"]
+    validate_mdcif(out)
 
 
 @pytest.mark.parametrize("suffix", [".cif", ".bcif"])

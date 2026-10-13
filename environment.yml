@@ -20,7 +20,7 @@ dependencies:
   - scipy                    # Windows + Smart App Control: replaced by PyPI wheel, see README
   - tbb                      # MKL threading layer (see variables above)
   # MD trajectories & analysis
-  - mdanalysis>=2.7
+  - mdanalysis>=2.8
   - scikit-learn>=1.3        # HDBSCAN (and any other clustering you bring)
   # mmCIF / PDB-IHM
   - gemmi

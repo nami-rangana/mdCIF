@@ -54,13 +54,14 @@ class _ModeHandler(ihm.reader.Handler):
     category = "_mdcif_mode"
 
     def __call__(self, id: int, mode_set_id: int, mode_index: int, eigenvalue: float,
-                 variance_fraction: float, model_id: int):
+                 variance_fraction: float, cartesian_variance: float, model_id: int):
         if mode_set_id is None and model_id is not None:
             raise ValueError("mdcif v0.1 file (_mdcif_mode.model_id, no _mdcif_mode_set); "
                              "rebuild it with this version of mdcif")
         _store(self, "_mdcif_modes")[id] = dict(mode_set_id=mode_set_id, mode_index=mode_index,
                                                 eigenvalue=eigenvalue,
-                                                variance_fraction=variance_fraction)
+                                                variance_fraction=variance_fraction,
+                                                cartesian_variance=cartesian_variance)
 
 
 class _ModeVectorHandler(ihm.reader.Handler):
@@ -163,13 +164,16 @@ def read_mdcif(path) -> MdcifData:
             if not np.array_equal(idx, atom_idx):
                 raise ValueError(f"mode set {set_id}: origin and vectors use different atoms")
             origin = np.array([c[1:] for c in comp], dtype=float)
+        cart = [m["cartesian_variance"] for _, m in rows]
         ms = ModeSet(
             eigenvalues=np.array([m["eigenvalue"] for _, m in rows]),
             eigenvectors=np.array(vecs, dtype=float),
             variance_fraction=np.array([_nan(m["variance_fraction"]) for _, m in rows]),
             method=info["method"], mass_weighted=bool(info["mass_weighted"]),
             selection=info["selection"], n_frames=info["n_frames"], origin=origin,
-            total_variance=info["total_variance"])
+            total_variance=info["total_variance"],
+            cartesian_variance=(None if all(v is None for v in cart)
+                                else np.array([_nan(v) for v in cart], dtype=float)))
         ms.atom_indices = atom_idx
         ms.model_id = model_id
         ms.scope = info["scope"]
