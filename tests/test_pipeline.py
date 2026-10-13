@@ -278,6 +278,9 @@ def test_build_and_read_round_trip(adk_files, tmp_path, suffix):
         written, read = summary.mode_sets[c], data.mode_sets[int(model._id)]
         assert np.allclose(read.eigenvalues, written.eigenvalues, rtol=1e-5)
         assert np.allclose(read.eigenvectors, written.eigenvectors, atol=1e-5)
+        # not stored: eigenvalue / total_variance, mode 1 = largest eigenvalue
+        assert np.allclose(read.variance_fraction, written.variance_fraction, rtol=1e-5)
+        assert read.scope == "cluster" and not read.mass_weighted
         # mode vectors point at the CA atoms of their own model
         names = [a.atom_id for a in model.get_atoms()]
         assert {names[i] for i in read.atom_indices} == {"CA"}
@@ -295,11 +298,22 @@ def test_mass_weighted_build_round_trip(adk_mdcif_mw):
     for c, (_, ms) in enumerate(sorted(data.mode_sets.items())):
         written = summary.mode_sets[c]
         assert ms.mass_weighted and ms.method == "quasi-harmonic"
+        # not stored: recomputed from the eigenvalues and the elements' standard masses
         assert np.allclose(ms.cartesian_variance, written.cartesian_variance, rtol=1e-5)
         # CA atoms only, all 12.011 amu: the masses only change the units
         assert np.allclose(ms.cartesian_variance, ms.eigenvalues / 12.011, rtol=1e-5)
-        assert "mass-weighted" in data.mode_set_info[c + 2]["details"]
     validate_mdcif(out)
+
+
+def test_derivable_items_are_not_written(adk_mdcif):
+    tags = {line.split()[0] for line in adk_mdcif[0].read_text().splitlines()
+            if line.startswith("_mdcif_")}
+    assert "_mdcif_mode.eigenvalue" in tags and "_mdcif_projection.frame" in tags
+    assert not tags & {"_mdcif_mode_set.scope", "_mdcif_mode_set.mass_weighted",
+                       "_mdcif_mode_set.details", "_mdcif_mode.mode_index",
+                       "_mdcif_mode.variance_fraction", "_mdcif_mode.cumulative_variance_fraction",
+                       "_mdcif_mode.cartesian_variance", "_mdcif_projection.id",
+                       "_mdcif_projection.mode_set_id"}
 
 
 @pytest.mark.parametrize("suffix", [".cif", ".bcif"])

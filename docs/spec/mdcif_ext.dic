@@ -11,7 +11,7 @@ _datablock.description
 
 _dictionary.title             mdcif_ext.dic
 _dictionary.datablock_id      mdcif_ext.dic
-_dictionary.version           0.0.3
+_dictionary.version           0.0.4
 
 loop_
 _dictionary_history.version
@@ -25,6 +25,14 @@ _dictionary_history.revision
 0.0.3 2026-10-13
 ;   New mdcif_mode.cartesian_variance: display amplitude in square angstroms,
     also for mass-weighted (quasi-harmonic) modes.
+;
+0.0.4 2026-10-13
+;   Removed items that follow from others: mdcif_mode_set.scope (ensemble_id),
+    mass_weighted (method), details; mdcif_mode.mode_index (eigenvalue rank),
+    variance_fraction and cumulative_variance_fraction (eigenvalue /
+    total_variance), cartesian_variance (eigenvalue and element masses);
+    mdcif_projection.id and mode_set_id (always the global set; the key is
+    now frame).
 ;
 
 ##############################################################################
@@ -173,10 +181,10 @@ save__mdcif_simulation.details
 save_mdcif_mode_set
     _category.description
 ;   A set of essential modes (PCA or quasi-harmonic eigenvectors) from one
-    covariance analysis. Scope "global": all analysed frames, superposed on
-    their average; its leading modes are the axes the frames were clustered
-    on. Scope "cluster": the frames of one cluster, superposed on that
-    cluster's deposited model.
+    covariance analysis. Without ensemble_id it is the global set: all
+    analysed frames, superposed on their average; its leading modes are the
+    axes the frames were clustered on. With ensemble_id it is a cluster set:
+    the frames of that cluster, superposed on its deposited model.
 ;
     _category.id                  mdcif_mode_set
     _category.mandatory_code      no
@@ -193,24 +201,11 @@ save__mdcif_mode_set.id
     _item_type.code                int
     save_
 
-save__mdcif_mode_set.scope
-    _item_description.description  'Which frames the covariance matrix was built from.'
-    _item.name                     '_mdcif_mode_set.scope'
-    _item.category_id              mdcif_mode_set
-    _item.mandatory_code           yes
-    _item_type.code                code
-    loop_
-    _item_enumeration.value
-    _item_enumeration.detail
-        global   'all analysed frames'
-        cluster  'the frames of the cluster given by ensemble_id'
-    save_
-
 save__mdcif_mode_set.model_id
     _item_description.description
 ;   The deposited model whose atoms the vector components (and origin)
-    refer to. For scope "cluster", the cluster's representative model; for
-    scope "global", the first model (all models share the same atoms and
+    refer to. For a cluster set, the cluster's representative model; for
+    the global set, the first model (all models share the same atoms and
     coordinate frame).
 ;
     _item.name                     '_mdcif_mode_set.model_id'
@@ -222,7 +217,7 @@ save__mdcif_mode_set.model_id
     save_
 
 save__mdcif_mode_set.ensemble_id
-    _item_description.description  'The cluster (ensemble) whose frames were analysed; "." for scope global.'
+    _item_description.description  'The cluster (ensemble) whose frames were analysed; "." for the global set.'
     _item.name                     '_mdcif_mode_set.ensemble_id'
     _item.category_id              mdcif_mode_set
     _item.mandatory_code           no
@@ -239,22 +234,11 @@ save__mdcif_mode_set.method
     _item_type.code                line
     loop_
     _item_enumeration.value
-        PCA
-        quasi-harmonic
-        ANM
-        other
-    save_
-
-save__mdcif_mode_set.mass_weighted
-    _item_description.description  'Whether the covariance matrix was mass-weighted.'
-    _item.name                     '_mdcif_mode_set.mass_weighted'
-    _item.category_id              mdcif_mode_set
-    _item.mandatory_code           no
-    _item_type.code                ucode
-    loop_
-    _item_enumeration.value
-        YES
-        NO
+    _item_enumeration.detail
+        PCA             'covariance of the Cartesian coordinates, not mass-weighted'
+        quasi-harmonic  'mass-weighted covariance, standard element masses'
+        ANM             'anisotropic network model'
+        other           .
     save_
 
 save__mdcif_mode_set.atom_selection
@@ -276,20 +260,12 @@ save__mdcif_mode_set.num_frames
 save__mdcif_mode_set.total_variance
     _item_description.description
 ;   Trace of the covariance matrix (sum of all eigenvalues), in square
-    angstroms (amu * square angstroms if mass_weighted is YES).
+    angstroms (amu * square angstroms if method is quasi-harmonic).
 ;
     _item.name                     '_mdcif_mode_set.total_variance'
     _item.category_id              mdcif_mode_set
     _item.mandatory_code           no
     _item_type.code                float
-    save_
-
-save__mdcif_mode_set.details
-    _item_description.description  'Free-text description of the analysis.'
-    _item.name                     '_mdcif_mode_set.details'
-    _item.category_id              mdcif_mode_set
-    _item.mandatory_code           no
-    _item_type.code                text
     save_
 
 ##############################################################################
@@ -298,8 +274,10 @@ save__mdcif_mode_set.details
 
 save_mdcif_mode
     _category.description
-;   One essential mode of a mode set: its eigenvalue and the fraction of the
-    total variance it explains. Components are in mdcif_mode_vector.
+;   One essential mode of a mode set and its eigenvalue. Within a set, mode 1
+    is the one with the largest eigenvalue, mode 2 the next, and so on; the
+    fraction of the variance a mode explains is eigenvalue / total_variance
+    of its set. Components are in mdcif_mode_vector.
 ;
     _category.id                  mdcif_mode
     _category.mandatory_code      no
@@ -326,54 +304,17 @@ save__mdcif_mode.mode_set_id
     _item_linked.parent_name       '_mdcif_mode_set.id'
     save_
 
-save__mdcif_mode.mode_index
-    _item_description.description  'Rank of the mode in its set; 1 is the largest-variance mode.'
-    _item.name                     '_mdcif_mode.mode_index'
-    _item.category_id              mdcif_mode
-    _item.mandatory_code           yes
-    _item_type.code                int
-    save_
-
 save__mdcif_mode.eigenvalue
     _item_description.description
 ;   Eigenvalue of the mode: variance along the mode in square angstroms
-    (amu * square angstroms if the set is mass-weighted). For the size of the
-    motion in angstroms use cartesian_variance.
+    (PCA), or in amu * square angstroms for quasi-harmonic (mass-weighted)
+    sets. For those, the variance of the Cartesian motion along the unit
+    vector v is eigenvalue / sum_j m_j |v_j|^2, with m_j the standard atomic
+    mass (amu) of the element of atom j.
 ;
     _item.name                     '_mdcif_mode.eigenvalue'
     _item.category_id              mdcif_mode
     _item.mandatory_code           yes
-    _item_type.code                float
-    save_
-
-save__mdcif_mode.variance_fraction
-    _item_description.description  'Fraction (0-1) of the total variance explained by this mode.'
-    _item.name                     '_mdcif_mode.variance_fraction'
-    _item.category_id              mdcif_mode
-    _item.mandatory_code           no
-    _item_type.code                float
-    save_
-
-save__mdcif_mode.cumulative_variance_fraction
-    _item_description.description  'Fraction (0-1) of the total variance explained by modes 1..mode_index.'
-    _item.name                     '_mdcif_mode.cumulative_variance_fraction'
-    _item.category_id              mdcif_mode
-    _item.mandatory_code           no
-    _item_type.code                float
-    save_
-
-save__mdcif_mode.cartesian_variance
-    _item_description.description
-;   Variance, in square angstroms, of the Cartesian displacement along the
-    unit vector of the mode (mdcif_mode_vector): one standard deviation of
-    the motion is sqrt(cartesian_variance) times that vector. Equal to the
-    eigenvalue for unweighted PCA; eigenvalue / sum_j m_j |v_j|^2 for
-    mass-weighted modes (m_j standard atomic masses in amu, v_j the stored
-    components), so viewers need no masses.
-;
-    _item.name                     '_mdcif_mode.cartesian_variance'
-    _item.category_id              mdcif_mode
-    _item.mandatory_code           no
     _item_type.code                float
     save_
 
@@ -509,33 +450,16 @@ save__mdcif_mode_origin.z
 save_mdcif_projection
     _category.description
 ;   Coordinates of analysed trajectory frames along modes 1-3 of the global
-    mode set, with the deposited model whose cluster each frame belongs to.
+    mode set (the mode set without ensemble_id), with the deposited model
+    whose cluster each frame belongs to.
     Enough to redraw the conformational landscape and the clusters from the
     file alone. May hold a regular subsample of the frames.
 ;
     _category.id                  mdcif_projection
     _category.mandatory_code      no
-    _category_key.name            '_mdcif_projection.id'
+    _category_key.name            '_mdcif_projection.frame'
     loop_
     _category_group.id            'inclusive_group'
-    save_
-
-save__mdcif_projection.id
-    _item_description.description  'Unique identifier for the projected frame.'
-    _item.name                     '_mdcif_projection.id'
-    _item.category_id              mdcif_projection
-    _item.mandatory_code           yes
-    _item_type.code                int
-    save_
-
-save__mdcif_projection.mode_set_id
-    _item_description.description  'The (global) mode set the frame is projected on.'
-    _item.name                     '_mdcif_projection.mode_set_id'
-    _item.category_id              mdcif_projection
-    _item.mandatory_code           yes
-    _item_type.code                int
-    _item_linked.child_name        '_mdcif_projection.mode_set_id'
-    _item_linked.parent_name       '_mdcif_mode_set.id'
     save_
 
 save__mdcif_projection.frame

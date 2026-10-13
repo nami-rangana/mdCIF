@@ -60,6 +60,8 @@ def test_viewer_reader_matches_core_reader(vdata, adk_mdcif):
     assert f.models == list(range(1, summary.n_models + 1))
     g, cg = f.global_set, core.global_modes
     assert np.allclose(g.eigenvalues, cg.eigenvalues, rtol=1e-5)
+    assert np.allclose(g.variance_fraction, cg.variance_fraction, rtol=1e-5)
+    assert g.scope == "global" and all(f.cluster_set(m).scope == "cluster" for m in core.mode_sets)
     assert np.allclose(g.vectors, cg.eigenvectors, atol=1e-5)
     assert np.allclose(g.origin, cg.origin, atol=1e-3)
     for m, ms in core.mode_sets.items():
@@ -101,10 +103,14 @@ def test_displacements_mode_frames_and_arrows(vdata, adk_mdcif):
 
 
 def test_mass_weighted_modes_are_drawn_in_angstrom(vdata, adk_mdcif_mw):
-    """Quasi-harmonic sets: arrows use cartesian_variance (A^2), not the amu A^2 eigenvalue."""
+    """Quasi-harmonic sets: arrows in A from the eigenvalue and the elements' masses."""
+    from mdcif.reader import read_mdcif
+
     f = vdata.MdcifFile(adk_mdcif_mw[0])
     ms = f.cluster_set(1)
     assert ms.mass_weighted and not f.global_set.mass_weighted
+    core = read_mdcif(adk_mdcif_mw[0]).mode_sets[1]
+    assert np.allclose(ms.cartesian_variance, core.cartesian_variance, rtol=1e-6)
     assert "amu A^2" in ms.summary()
     keys = f.model_keys[1]
     xyz = np.zeros((len(keys), 3))
@@ -112,9 +118,10 @@ def test_mass_weighted_modes_are_drawn_in_angstrom(vdata, adk_mdcif_mw):
     rms = np.sqrt((np.linalg.norm(ends - starts, axis=1) ** 2).sum())
     assert rms == pytest.approx(3.0 * np.sqrt(ms.cartesian_variance[0]), rel=1e-5)
     assert rms == pytest.approx(3.0 * np.sqrt(ms.eigenvalues[0] / 12.011), rel=1e-5)  # CA only
-    ms.cartesian_variance[:] = np.nan          # as in a file without the item
-    with pytest.raises(ValueError, match="rebuild"):
+    ms.cartesian_variance[:] = np.nan          # as for an element without a standard mass
+    with pytest.raises(ValueError, match="standard mass"):
         vdata.arrows(xyz, keys, ms, 1)
+
 
 def test_morph_frames(vdata):
     a, b = np.zeros((4, 3)), np.ones((4, 3))

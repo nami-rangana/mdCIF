@@ -8,9 +8,8 @@
     mdcif porcupine #1.1 mode 1 scale 3         arrows on the mode atoms of model 1
 
 ``amplitude`` / ``scale`` are in standard deviations of the mode (k in
-k * sigma * v, sigma = sqrt(_mdcif_mode.cartesian_variance) in angstroms, which is
-sqrt(lambda) for unweighted PCA and has the masses taken out for quasi-harmonic
-modes). Text mmCIF only.
+k * sigma * v, sigma in angstroms: sqrt(lambda) for PCA, with the elements'
+standard masses taken out for quasi-harmonic modes). Text mmCIF only.
 """
 
 import numpy as np

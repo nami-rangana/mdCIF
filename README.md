@@ -1,7 +1,7 @@
 # mdcif — a shareable mmCIF object for MD trajectories
 
 > Status: **pre-alpha**. The core pipeline (`mdcif build | info | validate | landscape`) works
-> end to end (format draft v0.3); the PyMOL plugin works and is tested; the ChimeraX bundle is
+> end to end (format draft v0.4); the PyMOL plugin works and is tested; the ChimeraX bundle is
 > implemented but has not yet been run inside ChimeraX.
 
 The PDB works because everyone shares one object (PDB / mmCIF) without needing to know how it

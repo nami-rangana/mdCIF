@@ -10,9 +10,8 @@ Usage (models load as states of one object)::
     mdcif_porcupine gb1, model=1, mode=1        CGO arrows gb1_m1_mode1_porcupine
 
 ``amplitude`` / ``scale`` are in standard deviations of the mode (k in
-k * sigma * v, sigma = sqrt(_mdcif_mode.cartesian_variance) in angstroms, which is
-sqrt(lambda) for unweighted PCA and has the masses taken out for quasi-harmonic
-modes). Self-contained: needs only PyMOL and numpy.
+k * sigma * v, sigma in angstroms: sqrt(lambda) for PCA, with the elements'
+standard masses taken out for quasi-harmonic modes). Self-contained: needs only PyMOL and numpy.
 """
 
 import os

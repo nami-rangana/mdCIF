@@ -5,10 +5,9 @@ IHMCIF on GitHub), downloaded once per python-ihm version and cached, plus
 docs/spec/mdcif_ext.dic, with ``ihm.dictionary.read``; combines them and runs
 the combined dictionary's validator on the file. Also checks mdcif-specific
 rules the dictionary can't express (unit-length vectors, one vector row per
-selected atom, mode_index order matching eigenvalue order, consistent variance
-fractions, a Cartesian variance per mode (equal to the eigenvalue unless the set
-is mass-weighted), orthonormal global modes with an origin, projections pointing
-at existing models).
+selected atom, eigenvalues within the total variance, a standard mass for
+every mode atom of a quasi-harmonic set, orthonormal global modes with an
+origin, projections pointing at existing models).
 """
 
 import os
@@ -75,20 +74,14 @@ def _check_mode_set(label, ms, tol):
     for i, nrm in enumerate(norms):
         if abs(nrm - 1) > tol:
             problems.append(f"{label} mode {i + 1}: |v| = {nrm:.4f}, expected 1")
-    if np.any(np.diff(ms.eigenvalues) > 0):
-        problems.append(f"{label}: eigenvalues not in decreasing mode_index order")
-    vf = ms.variance_fraction
+    vf = ms.variance_fraction  # eigenvalue / total_variance
     if np.any((vf < 0) | (vf > 1)) or vf.sum() > 1 + tol:
-        problems.append(f"{label}: variance fractions outside [0, 1]")
+        problems.append(f"{label}: eigenvalues negative or above the total variance")
     if len(np.unique(ms.atom_indices)) != len(ms.atom_indices):
         problems.append(f"{label}: duplicate atoms in mode vectors")
-    cart = ms.cartesian_variance
-    if cart is None or not np.all(np.asarray(cart) >= 0):  # NaN fails too
-        problems.append(f"{label}: missing or negative _mdcif_mode.cartesian_variance"
-                        + (" (needed to display mass-weighted modes)" if ms.mass_weighted else ""))
-    elif not ms.mass_weighted and not np.allclose(cart, ms.eigenvalues, rtol=tol, atol=0):
-        problems.append(f"{label}: cartesian_variance differs from the eigenvalue of an "
-                        f"unweighted mode set")
+    if ms.mass_weighted and not np.all(np.isfinite(ms.cartesian_variance)):
+        problems.append(f"{label}: quasi-harmonic modes on atoms without a standard mass "
+                        "(type_symbol), so their size in angstroms is unknown")
     return problems
 
 

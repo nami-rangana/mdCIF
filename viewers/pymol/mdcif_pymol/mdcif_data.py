@@ -8,17 +8,28 @@ Reads text mmCIF only (not BinaryCIF). Atoms are matched between the file and th
 viewer by (auth chain ID, auth residue number, atom name), as strings.
 
 Display conventions (docs/spec/mdcif_spec.md): displacement = k * sigma * v, k in
-standard deviations, sigma = sqrt(_mdcif_mode.cartesian_variance) in angstroms
-(= sqrt(eigenvalue) for unweighted PCA; the writer has already taken the masses
-out for mass-weighted modes, whose eigenvalues are in amu * angstrom^2). Atoms
-without their own vector component (side chains when the modes are on CA atoms)
-move with the vector of their residue's mode atom.
+standard deviations, sigma in angstroms: sqrt(eigenvalue) for PCA; for
+quasi-harmonic (mass-weighted) sets, whose eigenvalues are in amu * angstrom^2,
+sigma^2 = eigenvalue / sum_j m_j |v_j|^2 with the standard masses of the mode
+atoms' elements (_atom_site.type_symbol). Atoms without their own vector
+component (side chains when the modes are on CA atoms) move with the vector of
+their residue's mode atom.
+
+Items the file leaves out are derived here: the global set is the one without
+an ensemble_id, mode 1 is the largest eigenvalue of its set, and the variance
+fraction is eigenvalue / total_variance.
 """
 
 import numpy as np
 
 CATEGORIES = ("_atom_site", "_ihm_model_list", "_mdcif_mode_set", "_mdcif_mode",
               "_mdcif_mode_vector", "_mdcif_mode_origin", "_mdcif_projection")
+
+# Standard atomic masses (amu), the values mdcif computes quasi-harmonic modes with
+MASSES = {"H": 1.008, "C": 12.011, "N": 14.007, "O": 15.999, "S": 32.06, "P": 30.974,
+          "SE": 78.96, "F": 18.998, "CL": 35.45, "BR": 79.904, "I": 126.9045,
+          "NA": 22.989768, "K": 39.102, "MG": 24.305, "CA": 40.08, "MN": 54.93805,
+          "FE": 55.847, "CO": 58.9332, "NI": 58.6934, "CU": 63.546, "ZN": 65.37}
 
 
 # --------------------------------------------------------------------------- CIF reading
@@ -125,15 +136,17 @@ class ModeSet:
 
     def __init__(self, info):
         self.id = int(info["id"])
-        self.scope = info.get("scope") or "cluster"
+        self.scope = "global" if info.get("ensemble_id") is None else "cluster"
         self.model = int(info["model_id"])
         self.method = info.get("method") or "PCA"
-        self.mass_weighted = (info.get("mass_weighted") or "NO").upper() == "YES"
+        self.mass_weighted = self.method == "quasi-harmonic"
         self.selection = info.get("atom_selection") or ""
         self.n_frames = int(info["num_frames"]) if info.get("num_frames") else None
+        tv = info.get("total_variance")
+        self.total_variance = float(tv) if tv is not None else np.nan
         self.eigenvalues = np.zeros(0)
         self.variance_fraction = np.zeros(0)
-        self.cartesian_variance = np.zeros(0)   # angstrom^2, NaN if not in the file
+        self.cartesian_variance = np.zeros(0)   # angstrom^2, NaN without standard masses
         self.keys = []                          # atom key of every vector component
         self.vectors = np.zeros((0, 0, 3))      # (n_modes, n_atoms, 3)
         self.origin = None                      # (n_atoms, 3) for the global set
@@ -148,10 +161,8 @@ class ModeSet:
             raise ValueError(f"mode {mode_index} not in 1..{self.n_modes}")
         var = self.cartesian_variance[mode_index - 1]
         if np.isnan(var):
-            if self.mass_weighted:
-                raise ValueError(f"mode set {self.id}: mass-weighted modes without "
-                                 "_mdcif_mode.cartesian_variance; rebuild the file")
-            var = self.eigenvalues[mode_index - 1]
+            raise ValueError(f"mode set {self.id}: quasi-harmonic modes on atoms without a "
+                             "standard mass (_atom_site.type_symbol), size unknown")
         return float(np.sqrt(max(var, 0.0)))
 
     def summary(self):
@@ -181,14 +192,17 @@ class MdcifFile:
         chain = site.get("auth_asym_id") or site.get("label_asym_id")
         resnum = site.get("auth_seq_id") or site.get("label_seq_id")
         name = site.get("label_atom_id") or site.get("auth_atom_id")
+        element = site.get("type_symbol") or [None] * len(site["id"])
         self.atom_key = {}                      # _atom_site.id -> (chain, resnum, name)
         self.atom_model = {}                    # _atom_site.id -> model number
+        self.atom_element = {}                  # _atom_site.id -> element symbol
         self.model_keys = {}                    # model number -> keys in file order
         for i, aid in enumerate(site["id"]):
             m = int(model_col[i])
             key = (str(chain[i]), str(resnum[i]), str(name[i]))
             self.atom_key[aid] = key
             self.atom_model[aid] = m
+            self.atom_element[aid] = element[i]
             self.model_keys.setdefault(m, []).append(key)
         self.models = sorted(self.model_keys)
         ml = t.get("_ihm_model_list", {})
@@ -208,23 +222,16 @@ class MdcifFile:
         modes = t.get("_mdcif_mode", {})
         mode_of = {}                            # mode id -> (set id, mode index)
         per_set = {}
-        n = len(modes.get("id", []))
-        for mid, sid, idx, ev, vf, cv in zip(modes.get("id", []),
-                                             modes.get("mode_set_id", []),
-                                             modes.get("mode_index", []),
-                                             modes.get("eigenvalue", []),
-                                             _floats(modes.get("variance_fraction", [None] * n)),
-                                             _floats(modes.get("cartesian_variance", [None] * n)),
-                                             strict=True):
-            per_set.setdefault(int(sid), []).append((int(idx), mid, float(ev), vf, cv))
+        for mid, sid, ev in zip(modes.get("id", []), modes.get("mode_set_id", []),
+                                modes.get("eigenvalue", []), strict=True):
+            per_set.setdefault(int(sid), []).append((-float(ev), int(mid), mid))
         for sid, rows in per_set.items():
-            rows.sort()
+            rows.sort()                         # mode 1 = largest eigenvalue
             ms = sets[sid]
-            ms.eigenvalues = np.array([r[2] for r in rows])
-            ms.variance_fraction = np.array([r[3] for r in rows])
-            ms.cartesian_variance = np.array([r[4] for r in rows])
+            ms.eigenvalues = np.array([-r[0] for r in rows])
+            ms.variance_fraction = ms.eigenvalues / ms.total_variance
             for k, r in enumerate(rows):
-                mode_of[r[1]] = (sid, k)
+                mode_of[r[2]] = (sid, k)
         vec = t.get("_mdcif_mode_vector", {})
         comps = {}
         for mid, aid, dx, dy, dz in zip(vec.get("mode_id", []), vec.get("atom_id", []),
@@ -237,6 +244,12 @@ class MdcifFile:
             aids = sorted(by_atom, key=int)
             ms.keys = [self.atom_key[a] for a in aids]
             ms.vectors = np.array([[by_atom[a][k] for a in aids] for k in range(ms.n_modes)])
+        for ms in sets.values():
+            ms.cartesian_variance = ms.eigenvalues.astype(float)
+            if ms.mass_weighted and ms.keys:
+                masses = np.array([MASSES.get(str(self.atom_element.get(a)).upper(), np.nan)
+                                   for a in sorted(comps.get(ms.id, {}), key=int)])
+                ms.cartesian_variance = ms.eigenvalues / ((ms.vectors ** 2).sum(axis=2) @ masses)
         org = t.get("_mdcif_mode_origin", {})
         origins = {}
         for sid, aid, x, y, z in zip(org.get("mode_set_id", []), org.get("atom_id", []),

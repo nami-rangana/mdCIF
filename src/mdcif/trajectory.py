@@ -103,6 +103,18 @@ def read_frames(universe, selection, start=0, stop=None, step=1):
     return out, frames, times
 
 
+def standard_masses(elements):
+    """Standard atomic masses (amu) of element symbols (any case); NaN if unknown.
+
+    MDAnalysis's table, so a file's quasi-harmonic modes are read back with the
+    masses they were computed with (see :func:`element_masses`).
+    """
+    from MDAnalysis.guesser.tables import masses
+
+    table = {k.upper(): v for k, v in masses.items()}
+    return np.array([table.get(str(e).strip().upper(), np.nan) for e in elements])
+
+
 def element_masses(atoms):
     """Standard atomic masses (amu) of an AtomGroup, from its elements.
 
@@ -114,14 +126,12 @@ def element_masses(atoms):
     """
     from MDAnalysis.exceptions import NoDataError
     from MDAnalysis.guesser.default_guesser import DefaultGuesser
-    from MDAnalysis.guesser.tables import masses
 
-    table = {k.upper(): v for k, v in masses.items()}
     try:
         elements = atoms.elements
     except NoDataError:
         elements = [DefaultGuesser(None).guess_atom_element(n) for n in atoms.names]
-    out = np.array([table.get(str(e).strip().upper(), np.nan) for e in elements])
+    out = standard_masses(elements)
     if np.isnan(out).any():
         unknown = sorted({f"{a.name} ({e})" for a, e, m in zip(atoms, elements, out, strict=True)
                           if np.isnan(m)})

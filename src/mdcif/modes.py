@@ -5,9 +5,11 @@ its top modes are the axes the frames are clustered on. For each cluster,
 frames are aligned to the cluster representative, the covariance matrix of the
 selected atoms is diagonalized, and the top ``k`` eigenvectors are kept.
 Vectors are stored as unit-length Cartesian displacements in the frame of the
-deposited models (see docs/spec/mdcif_spec.md), with the variance of the motion
-along each of them in square angstroms (``cartesian_variance``; the eigenvalue
-itself is in amu * square angstroms for mass-weighted, quasi-harmonic modes).
+deposited models (see docs/spec/mdcif_spec.md). ``cartesian_variance`` is the
+variance of the motion along each of them in square angstroms: the eigenvalue
+for PCA; for mass-weighted (quasi-harmonic) modes, whose eigenvalues are in
+amu * square angstroms, it is not stored but follows from the eigenvalue and
+the standard masses of the atoms' elements.
 """
 
 from dataclasses import dataclass

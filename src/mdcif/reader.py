@@ -2,7 +2,12 @@
 
 ``ihm.reader.read`` with extra handlers for the ``_mdcif_`` categories,
 returning the ``ihm.System`` plus the simulation conditions, the per-model
-and global ``ModeSet``s and the frame projections.
+and global ``ModeSet``s and the frame projections. What the file leaves out
+because it follows from other items is filled in here: the scope of a mode set
+(global = no ensemble), mass weighting (method quasi-harmonic), the mode order
+(largest eigenvalue first), variance fractions (eigenvalue / total variance) and,
+for quasi-harmonic sets, the Cartesian variance (from the standard masses of the
+mode atoms' elements, as in :func:`mdcif.trajectory.element_masses`).
 
 ``_mdcif_mode_vector.atom_id`` and ``_mdcif_mode_origin.atom_id`` refer to
 ``_atom_site.id``. python-ihm does not keep atom_site ids, so they are mapped
@@ -18,6 +23,7 @@ import ihm.reader
 import numpy as np
 
 from .modes import ModeSet
+from .trajectory import standard_masses
 
 
 class _SimulationHandler(ihm.reader.Handler):
@@ -42,26 +48,22 @@ def _store(handler, name):
 class _ModeSetHandler(ihm.reader.Handler):
     category = "_mdcif_mode_set"
 
-    def __call__(self, id: int, scope, model_id: int, ensemble_id: int, method, mass_weighted,
-                 atom_selection, num_frames: int, total_variance: float, details):
+    def __call__(self, id: int, model_id: int, ensemble_id: int, method, atom_selection,
+                 num_frames: int, total_variance: float):
         _store(self, "_mdcif_mode_sets")[id] = dict(
-            scope=scope, model_id=model_id, ensemble_id=ensemble_id, method=method,
-            mass_weighted=self.get_bool(mass_weighted), selection=atom_selection,
-            n_frames=num_frames, total_variance=total_variance, details=details)
+            scope="global" if ensemble_id is None else "cluster", model_id=model_id,
+            ensemble_id=ensemble_id, method=method, mass_weighted=method == "quasi-harmonic",
+            selection=atom_selection, n_frames=num_frames, total_variance=total_variance)
 
 
 class _ModeHandler(ihm.reader.Handler):
     category = "_mdcif_mode"
 
-    def __call__(self, id: int, mode_set_id: int, mode_index: int, eigenvalue: float,
-                 variance_fraction: float, cartesian_variance: float, model_id: int):
+    def __call__(self, id: int, mode_set_id: int, eigenvalue: float, model_id: int):
         if mode_set_id is None and model_id is not None:
             raise ValueError("mdcif v0.1 file (_mdcif_mode.model_id, no _mdcif_mode_set); "
                              "rebuild it with this version of mdcif")
-        _store(self, "_mdcif_modes")[id] = dict(mode_set_id=mode_set_id, mode_index=mode_index,
-                                                eigenvalue=eigenvalue,
-                                                variance_fraction=variance_fraction,
-                                                cartesian_variance=cartesian_variance)
+        _store(self, "_mdcif_modes")[id] = dict(mode_set_id=mode_set_id, eigenvalue=eigenvalue)
 
 
 class _ModeVectorHandler(ihm.reader.Handler):
@@ -81,10 +83,10 @@ class _ModeOriginHandler(ihm.reader.Handler):
 class _ProjectionHandler(ihm.reader.Handler):
     category = "_mdcif_projection"
 
-    def __call__(self, id: int, mode_set_id: int, frame: int, time: float, model_id: int,
-                 proj_1: float, proj_2: float, proj_3: float):
+    def __call__(self, frame: int, time: float, model_id: int, proj_1: float, proj_2: float,
+                 proj_3: float):
         rows = self.sysr.system.__dict__.setdefault("_mdcif_projection_rows", [])
-        rows.append((mode_set_id, frame, time, model_id, proj_1, proj_2, proj_3))
+        rows.append((frame, time, model_id, proj_1, proj_2, proj_3))
 
 
 HANDLERS = [_SimulationHandler, _ModeSetHandler, _ModeHandler, _ModeVectorHandler,
@@ -120,12 +122,13 @@ def read_mdcif(path) -> MdcifData:
         with open(path, encoding="utf-8") as fh:
             system = ihm.reader.read(fh, handlers=HANDLERS)[0]
 
-    offsets = {}
+    offsets, model_atoms = {}, {}
     n = 0
     for _, model in system._all_models():
-        count = sum(1 for _ in model.get_atoms())
-        offsets[int(model._id)] = (n, count)
-        n += count
+        atoms = list(model.get_atoms())
+        model_atoms[int(model._id)] = atoms
+        offsets[int(model._id)] = (n, len(atoms))
+        n += len(atoms)
 
     def atom_indices(model_id, atom_ids, what):
         start, count = offsets[model_id]
@@ -139,8 +142,9 @@ def read_mdcif(path) -> MdcifData:
     vectors = getattr(system, "_mdcif_vectors", {})
     origins = getattr(system, "_mdcif_origins", {})
     by_set = {}
+    # mode 1 of a set = its largest eigenvalue
     for mode_id, m in sorted(modes.items(), key=lambda kv: (kv[1]["mode_set_id"],
-                                                             kv[1]["mode_index"])):
+                                                             -kv[1]["eigenvalue"], kv[0])):
         by_set.setdefault(m["mode_set_id"], []).append((mode_id, m))
     mode_sets, global_modes = {}, None
     for set_id, rows in by_set.items():
@@ -164,16 +168,19 @@ def read_mdcif(path) -> MdcifData:
             if not np.array_equal(idx, atom_idx):
                 raise ValueError(f"mode set {set_id}: origin and vectors use different atoms")
             origin = np.array([c[1:] for c in comp], dtype=float)
-        cart = [m["cartesian_variance"] for _, m in rows]
+        evals = np.array([m["eigenvalue"] for _, m in rows], dtype=float)
+        vecs = np.array(vecs, dtype=float)
+        cart = None
+        if info["mass_weighted"]:  # NaN if a mode atom's element has no standard mass
+            masses = standard_masses([model_atoms[model_id][i].type_symbol for i in atom_idx])
+            cart = evals / ((vecs ** 2).sum(axis=2) @ masses)
+        total = info["total_variance"]
         ms = ModeSet(
-            eigenvalues=np.array([m["eigenvalue"] for _, m in rows]),
-            eigenvectors=np.array(vecs, dtype=float),
-            variance_fraction=np.array([_nan(m["variance_fraction"]) for _, m in rows]),
-            method=info["method"], mass_weighted=bool(info["mass_weighted"]),
+            eigenvalues=evals, eigenvectors=vecs,
+            variance_fraction=evals / total if total else np.full(len(evals), np.nan),
+            method=info["method"], mass_weighted=info["mass_weighted"],
             selection=info["selection"], n_frames=info["n_frames"], origin=origin,
-            total_variance=info["total_variance"],
-            cartesian_variance=(None if all(v is None for v in cart)
-                                else np.array([_nan(v) for v in cart], dtype=float)))
+            total_variance=total, cartesian_variance=cart)
         ms.atom_indices = atom_idx
         ms.model_id = model_id
         ms.scope = info["scope"]
@@ -185,13 +192,13 @@ def read_mdcif(path) -> MdcifData:
     projection = None
     rows = getattr(system, "_mdcif_projection_rows", None)
     if rows:
-        rows.sort(key=lambda r: r[1])
-        projection = {
-            "mode_set_id": rows[0][0],
-            "frame": np.array([r[1] for r in rows], dtype=int),
-            "time": np.array([_nan(r[2]) for r in rows], dtype=float),
-            "model_id": np.array([r[3] or 0 for r in rows], dtype=int),
-            "coords": np.array([[_nan(v) for v in r[4:]] for r in rows], dtype=float),
+        rows.sort(key=lambda r: r[0])
+        projection = {  # always on the global set
+            "mode_set_id": next((i for i, s in infos.items() if s["scope"] == "global"), None),
+            "frame": np.array([r[0] for r in rows], dtype=int),
+            "time": np.array([_nan(r[1]) for r in rows], dtype=float),
+            "model_id": np.array([r[2] or 0 for r in rows], dtype=int),
+            "coords": np.array([[_nan(v) for v in r[3:]] for r in rows], dtype=float),
         }
     return MdcifData(system=system, simulation=getattr(system, "_mdcif_simulation", {}),
                      mode_sets=mode_sets, global_modes=global_modes, projection=projection,

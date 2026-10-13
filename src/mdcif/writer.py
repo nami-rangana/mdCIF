@@ -295,19 +295,14 @@ def build_system(atoms, model_coords, clusters, mode_sets, provenance, mode_atom
         ensembles.append(ensemble)
     system.state_groups.append(ihm.model.StateGroup([state]))
 
-    # (scope, model whose atoms the vectors refer to, ensemble, ModeSet, write origin, details)
+    # (scope, model whose atoms the vectors refer to, ensemble, ModeSet, write origin);
+    # the scope is not written: the global set is the one without an ensemble
     sets = []
     if global_modes is not None:
-        sets.append(("global", models[0], None, global_modes, True,
-                     "PCA of all analysed frames superposed on their average"
-                     + (f"; the frames were clustered on modes 1-{clusters.params['n_pcs']}"
-                        if "n_pcs" in clusters.params else "")))
+        sets.append(("global", models[0], None, global_modes, True))
     for c in range(n_models):
         if c < len(mode_sets) and mode_sets[c] is not None:
-            sets.append(("cluster", models[c], ensembles[c], mode_sets[c], False,
-                         f"frames of cluster {c + 1} superposed on its medoid"
-                         + ("; mass-weighted with standard element masses"
-                            if mode_sets[c].mass_weighted else "")))
+            sets.append(("cluster", models[c], ensembles[c], mode_sets[c], False))
     system._mdcif = {"simulation": sim, "protocol": protocol, "engine": engine_sw,
                      "mode_sets": sets, "mode_atoms": np.asarray(mode_atoms, dtype=int),
                      "projection": projection, "models": models}
@@ -359,33 +354,25 @@ class _ModeDumper(ihm.dumper.Dumper):
             def fmt(v):
                 return f"{v:.6g}" if abs(v) >= 1e-4 or v == 0 else f"{v:.4e}"
         atom_idx = info["mode_atoms"]
+        # Not written, readers derive them: the scope (ensemble_id), mass weighting (method),
+        # each mode's rank (eigenvalue order), variance fractions (eigenvalue / total_variance)
+        # and the Cartesian variance (eigenvalue and element masses).
         with writer.loop("_mdcif_mode_set", [
-                "id", "scope", "model_id", "ensemble_id", "method", "mass_weighted",
-                "atom_selection", "num_frames", "total_variance", "details"]) as lp:
-            for set_id, (scope, model, ensemble, ms, _, details) in enumerate(
-                    info["mode_sets"], 1):
-                lp.write(id=set_id, scope=scope, model_id=model._id,
+                "id", "model_id", "ensemble_id", "method", "atom_selection", "num_frames",
+                "total_variance"]) as lp:
+            for set_id, (_, model, ensemble, ms, _) in enumerate(info["mode_sets"], 1):
+                lp.write(id=set_id, model_id=model._id,
                          ensemble_id=ensemble._id if ensemble is not None else None,
-                         method=ms.method, mass_weighted="YES" if ms.mass_weighted else "NO",
-                         atom_selection=ms.selection, num_frames=ms.n_frames,
+                         method=ms.method, atom_selection=ms.selection, num_frames=ms.n_frames,
                          total_variance=(fmt(ms.total_variance)
-                                         if ms.total_variance is not None else None),
-                         details=details)
+                                         if ms.total_variance is not None else None))
         rows = []
-        with writer.loop("_mdcif_mode", [
-                "id", "mode_set_id", "mode_index", "eigenvalue", "variance_fraction",
-                "cumulative_variance_fraction", "cartesian_variance"]) as lp:
+        with writer.loop("_mdcif_mode", ["id", "mode_set_id", "eigenvalue"]) as lp:
             mode_id = 0
-            for set_id, (_, model, _, ms, _, _) in enumerate(info["mode_sets"], 1):
-                cum = ms.cumulative_variance_fraction
-                cart = ms.cartesian_variance
-                for i in range(ms.n_modes):
+            for set_id, (_, model, _, ms, _) in enumerate(info["mode_sets"], 1):
+                for i in range(ms.n_modes):  # largest eigenvalue first
                     mode_id += 1
-                    lp.write(id=mode_id, mode_set_id=set_id, mode_index=i + 1,
-                             eigenvalue=fmt(ms.eigenvalues[i]),
-                             variance_fraction=fmt(ms.variance_fraction[i]),
-                             cumulative_variance_fraction=fmt(cum[i]),
-                             cartesian_variance=fmt(cart[i]) if cart is not None else None)
+                    lp.write(id=mode_id, mode_set_id=set_id, eigenvalue=fmt(ms.eigenvalues[i]))
                     rows.append((mode_id, offsets[id(model)], ms.eigenvectors[i]))
         with writer.loop("_mdcif_mode_vector", ["mode_id", "atom_id", "dx", "dy", "dz"]) as lp:
             for mode_id, offset, vec in rows:
@@ -393,7 +380,7 @@ class _ModeDumper(ihm.dumper.Dumper):
                     lp.write(mode_id=mode_id, atom_id=offset + int(a) + 1,
                              dx=fmt(vec[k, 0]), dy=fmt(vec[k, 1]), dz=fmt(vec[k, 2]))
         with writer.loop("_mdcif_mode_origin", ["mode_set_id", "atom_id", "x", "y", "z"]) as lp:
-            for set_id, (_, model, _, ms, write_origin, _) in enumerate(info["mode_sets"], 1):
+            for set_id, (_, model, _, ms, write_origin) in enumerate(info["mode_sets"], 1):
                 if not write_origin or ms.origin is None:
                     continue
                 for k, a in enumerate(atom_idx):
@@ -405,14 +392,14 @@ class _ModeDumper(ihm.dumper.Dumper):
             return
         models = info["models"]
         n_cols = min(3, proj["coords"].shape[1])
+        # on the global set (mode set 1), keyed by frame
         with writer.loop("_mdcif_projection", [
-                "id", "mode_set_id", "frame", "time", "model_id", "proj_1", "proj_2",
-                "proj_3"]) as lp:
+                "frame", "time", "model_id", "proj_1", "proj_2", "proj_3"]) as lp:
             for i in range(len(proj["frames"])):
                 label = int(proj["labels"][i])
                 p = [float(proj["coords"][i, j]) if j < n_cols else None for j in range(3)]
                 time = proj.get("times")
-                lp.write(id=i + 1, mode_set_id=1, frame=int(proj["frames"][i]),
+                lp.write(frame=int(proj["frames"][i]),
                          time=(float(time[i]) if time is not None and np.isfinite(time[i])
                                else None),
                          model_id=models[label]._id if 0 <= label < len(models) else None,
