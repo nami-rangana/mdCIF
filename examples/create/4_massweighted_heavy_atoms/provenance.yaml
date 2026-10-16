@@ -1,0 +1,62 @@
+# Provenance of the GB1 (protein G B1 domain) MELD run, 300 K replica.
+# Run inputs: meld-amber/3GB1 (leap.in, meld.mdin.001, meld.groupfile, restraints.indxf,
+# ss.dat); copies used for the example live in examples/data/3gb1/meld/ (git-ignored).
+
+# Used by 4_massweighted_heavy_atoms.ipynb: same run as ../1_basic/provenance.yaml; only the
+# atoms (all C, N and O of the protein) and the mass weighting of the modes differ.
+
+dataset:
+  title: "Protein G B1 domain (PDB 3GB1) folded with MELD x Amber: 300 K replica ensemble"
+  authors: []                 # fill in before sharing ("Last, F.")
+  trajectory_doi: ""
+  trajectory_database: ""
+  trajectory_accession: ""
+
+system:
+  name: "GB1 MELD 300K"
+  source_structure: ""        # extended chain built from sequence by tleap (leap.in), not 3GB1
+  reference_PDB_id: 3GB1      # experimental structure (solution NMR, 32 models)
+  composition: "Protein G B1 domain, 56 residues; implicit solvent"
+
+simulation:
+  engine: AMBER
+  engine_version: "24 (pmemd.cuda.MPI, multipmemd)"
+  force_field: ff19SB
+  water_model: "implicit: GB-Neck2 (igb=8, mbondi3 radii)"
+  ensemble: NVT
+  temperature_K: 300          # temperature of the analysed replica (ladder 300-550 K)
+  pressure_bar: null
+  timestep_fs: 4              # hydrogen mass repartitioning
+  length_ns: 403.65           # per replica (500 ns planned; stopped at the wall-time limit)
+  n_replicas: 30
+  enhanced_sampling: "MELD: temperature + Hamiltonian replica exchange"
+  save_interval_ps: 2
+  details: >-
+    MELD (Modeling Employing Limited Data) folding from an extended chain built from sequence
+    with tleap. 30 replicas, geometric temperature ladder 300-550 K over the first 30% of
+    replicas; exchanges every 50 ps (12500 steps). Restraints: secondary structure from ss.dat
+    (28 helix/strand windows, 85% active, constant strength), strand pairing (213 groups, 10
+    active) and hydrophobic contacts (121 groups, 21 active), both scaled nonlinearly from 1.0
+    to 0.4 along the replica ladder and faded in over the first 200 exchanges. Langevin
+    thermostat (gamma 2/ps), SHAKE on bonds to hydrogen, no nonbonded cutoff. Analysed:
+    replica 1 (300 K, full restraint strength; Amber file meld.nc.001).
+
+analysis:
+  frames_used: "replica 1 (300 K), 50-403.65 ns, every 10th saved frame (20 ps)"
+  alignment_selection: "protein and element C N O"
+
+clustering:
+  software: scikit-learn
+  method: hdbscan
+  feature: PCA projection
+  selection: "protein and element C N O"
+  n_clusters: null
+  cutoff_angstrom: null
+  n_models_deposited: null
+
+modes:
+  method: quasi-harmonic
+  selection: "protein and element C N O"   # mdcif build --selection
+  mass_weighted: true                      # mdcif build --mass-weighted
+  n_modes: 3
+  per_cluster: true
