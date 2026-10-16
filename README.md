@@ -25,7 +25,8 @@ use outside the MD community. Cluster centroids are easy to share but lose the d
    so anyone can redraw the clusters from the file alone (`mdcif landscape`).
 
 …and viewer plugins for **ChimeraX** and **PyMOL** to morph between models, animate along each
-model's own modes (or the global PCs), and draw porcupine plots.
+model's own modes (or the global PCs), and draw porcupine plots; in a Jupyter notebook,
+`mdcif.view.MdcifViewer` does the same with py3Dmol.
 
 Worked example: GB1 folded with MELD × Amber, written as an edited copy of PDB 3GB1 —
 [examples/3gb1/](examples/3gb1/README.md).
@@ -177,6 +178,26 @@ mdcif_porcupine gb1, model=1, mode=1, scale=3
 
 Or install it permanently via *Plugin → Plugin Manager → Install New Plugin* and choose
 `viewers/pymol/mdcif_pymol/__init__.py`.
+
+### 6. View in a Jupyter notebook (py3Dmol)
+
+No plugin needed: `mdcif.view.MdcifViewer` draws a file with
+[py3Dmol](https://pypi.org/project/py3Dmol/). Each method returns an ordinary py3Dmol view, so
+`.show()`, `.rotate()` and `.zoom()` work on it:
+
+```python
+from mdcif.view import MdcifViewer, save_png
+
+viewer = MdcifViewer("gb1.cif")
+viewer.show()                                  # all models together, one colour each
+viewer.show(2)                                 # only model 2 (or show(1, 3), ...)
+viewer.porcupine(1).show()                     # model 1: one panel per mode, arrows at 3 sd
+viewer.porcupine(2, mode=1, scope="global")    # global mode 1 drawn on model 2
+viewer.movie(1).show()                         # model 1 moving along each of its modes
+save_png(viewer.porcupine(1, mode=1), "porcupine.png", width_in=3.5)   # needs Chrome
+```
+
+Walkthrough: [examples/view/python/view_mdcif.ipynb](examples/view/python/view_mdcif.ipynb).
 
 ## Data
 

@@ -1,6 +1,12 @@
 # ChimeraX bundle for mdcif files.
-# Install for development from the ChimeraX command line:
+# Install for development (delete dist/ first: the builder installs the first wheel it finds):
 #   devel install <path to mdcif>/viewers/chimerax
+# Update an installed copy in one session, no restart (the bundle is in use from startup
+# because of custom init, so a plain re-install is deferred to the next start, which then
+# skips a same-version wheel):
+#   toolshed uninstall ChimeraX-MDCIF; devel install <path to mdcif>/viewers/chimerax
+# or headless: chimerax --nogui --safemode --cmd "devel install ..." (--safemode with the
+# window crashes ChimeraX 1.12: 'Session' object has no attribute 'main_view').
 
 [build-system]
 requires = ["setuptools", "ChimeraX-BundleBuilder"]
@@ -10,20 +16,22 @@ build-backend = "chimerax.bundle_builder.cx_pep517"
 name = "ChimeraX-MDCIF"
 license = { text = "MIT" }
 authors = [{ name = "The mdcif authors" }]
-description = "Read mdcif files: switch between MD cluster models, animate essential modes, draw porcupine plots"
-dependencies = ["ChimeraX-Core ~=1.0"]
+description = "Read mdcif files (opened as usual or with 'mdcif open'): switch between MD cluster models, animate essential modes, draw porcupine plots"
+dependencies = ["ChimeraX-Core ~=1.7"]   # Python >= 3.10 (zip strict)
 dynamic = ["classifiers", "requires-python", "version"]
 
 [project.readme]
 content-type = "text"
 text = """Viewer for mdcif files (MD trajectories summarized as PDB-IHM-compatible
 mmCIF): switch between cluster representatives, animate each model along its
-own PCA / quasi-harmonic modes, and draw porcupine plots."""
+own PCA / quasi-harmonic modes, and draw porcupine plots. mdcif files opened
+the normal way (open, File > Open, drag and drop) get their mode data too."""
 
 [tool.setuptools.dynamic]
 version = { attr = "src.__version__" }
 
 [tool.chimerax]
+custom-init = true                      # BundleAPI.initialize: "add models" handler (attach.py)
 min-session-version = 1
 max-session-version = 1
 categories = ["Structure Analysis"]
