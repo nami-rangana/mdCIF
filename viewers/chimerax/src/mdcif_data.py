@@ -346,6 +346,36 @@ def mode_frames(coords, keys, ms, mode_index, amplitude=3.0, n_frames=30):
     return np.asarray(coords, float)[None] + amplitude * sigma * phase[:, None, None] * d[None]
 
 
+MEASURES = {"distance": 2, "angle": 3, "dihedral": 4}     # kind -> number of atoms
+
+
+def measure(points, kind):
+    """A distance (A), angle or dihedral (degrees) at every frame of ``(n_frames, k, 3)`` points.
+
+    The angle is at the middle atom, in [0, 180]. The dihedral has the IUPAC sign (positive =
+    clockwise looking from atom 2 to atom 3); it is in (-180, 180] at the first frame and is
+    unwrapped along the frames, so a swing across +/-180 doesn't jump by 360.
+    """
+    if kind not in MEASURES:
+        raise ValueError(f"unknown measurement {kind!r} (one of {', '.join(MEASURES)})")
+    p = np.asarray(points, float)
+    if p.ndim != 3 or p.shape[1:] != (MEASURES[kind], 3):
+        raise ValueError(f"a {kind} needs points of shape (n_frames, {MEASURES[kind]}, 3), "
+                         f"got {p.shape}")
+    if kind == "distance":
+        return np.linalg.norm(p[:, 1] - p[:, 0], axis=1)
+    if kind == "angle":
+        a, b = p[:, 0] - p[:, 1], p[:, 2] - p[:, 1]
+        return np.degrees(np.arctan2(np.linalg.norm(np.cross(a, b), axis=1),
+                                     (a * b).sum(axis=1)))
+    b1, b2, b3 = p[:, 1] - p[:, 0], p[:, 2] - p[:, 1], p[:, 3] - p[:, 2]
+    n1, n2 = np.cross(b1, b2), np.cross(b2, b3)
+    phi = np.arctan2(np.linalg.norm(b2, axis=1) * (b1 * n2).sum(axis=1), (n1 * n2).sum(axis=1))
+    if len(phi) and phi[0] <= -np.pi:            # -180 only from a signed zero: report +180
+        phi[0] = np.pi
+    return np.degrees(np.unwrap(phi))
+
+
 def morph_frames(model_coords, steps=10, wrap=True):
     """Linear interpolation through a list of ``(n, 3)`` model coordinates (same atoms)."""
     seq = list(model_coords) + ([model_coords[0]] if wrap and len(model_coords) > 1 else [])

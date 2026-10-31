@@ -4,10 +4,13 @@
 mmCIF reader. The bundle's custom init puts a handler on the "add models" trigger that finds
 the mdcif content of new structures and attaches it the way ``mdcif open`` does:
 
-    s.mdcif_data    MdcifFile of the file (not saved in sessions)
-    s.mdcif_model   model number in the file          | registered attributes: saved in
-    s.mdcif_path    absolute path of the file         | sessions, so a restored session
-    s.mdcif_copy    True for 'mdcif animate' copies   | gets its data back from the file
+    s.mdcif_data        MdcifFile of the file (not saved in sessions)
+    s.mdcif_model       model number in the file          | registered attributes: saved in
+    s.mdcif_path        absolute path of the file         | sessions, so a restored session
+    s.mdcif_copy        True for 'mdcif animate' copies   | gets its data back from the file
+    s.mdcif_mode        an animate copy's mode, scope     |
+    s.mdcif_scope       and amplitude (sd), what 'mdcif   | (None on copies made before
+    s.mdcif_amplitude   plot' measures along              |  0.3.0)
 
 The structures of one file are matched to its models in id order (#1.1 = model 1), or by their
 saved ``mdcif_model`` (restored sessions, animate copies). Ordinary mmCIF files only cost a
@@ -17,7 +20,8 @@ byte scan for "_mdcif_" (about 0.15 s per 300 MB from the page cache) and are le
 import os
 
 REGISTRANT = "MDCIF"
-ATTRS = (("mdcif_path", str), ("mdcif_model", int), ("mdcif_copy", bool))
+ATTRS = (("mdcif_path", str), ("mdcif_model", int), ("mdcif_copy", bool),
+         ("mdcif_mode", int), ("mdcif_scope", str), ("mdcif_amplitude", float))
 CIF_SUFFIXES = (".cif", ".mmcif")
 MARK = b"_mdcif_"
 

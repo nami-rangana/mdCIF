@@ -9,6 +9,9 @@
     mdcif animate #1.2 mode 1 scope global      ... along global PC1 (the clustering axis)
     mdcif porcupine #1.1 mode 1 scale 3         arrows on the mode atoms of model 1
     coordset stop #2                            stop an animation (ChimeraX ``coordset``)
+    mdcif plot distance #2/A:10@CA #2/A:40@CA   the distance at every frame of animation #2
+    mdcif plot dihedral sel saveData d.csv      4 picked atoms (in picking order); a window
+                                                with the GUI, saveData / saveImage headless too
 
 ``amplitude`` / ``scale`` are in standard deviations of the mode (k in
 k * sigma * v, sigma in angstroms: sqrt(lambda) for PCA, with the elements'
@@ -17,13 +20,14 @@ standard masses taken out for quasi-harmonic modes). Text mmCIF only.
 Structures get their data from ``attach`` (on open, on session restore, or the first
 time a command needs it). An animated copy keeps its model's mode data, so ``mdcif
 porcupine`` works on it too; both commands start from the deposited coordinates (the
-copy's first coordinate set).
+copy's first coordinate set). ``mdcif plot`` measures on an animate copy (made for it from
+a model, or the one given); plots and the MDCIF Plot window are in ``plot.py`` / ``tool.py``.
 """
 
 import os
 
 import numpy as np
-from chimerax.atomic import AtomicStructureArg, AtomicStructuresArg
+from chimerax.atomic import AtomicStructureArg, AtomicStructuresArg, AtomsArg
 from chimerax.core.commands import (
     BoolArg,
     CmdDesc,
@@ -33,15 +37,22 @@ from chimerax.core.commands import (
     FloatArg,
     IntArg,
     OpenFileNameArg,
+    SaveFileNameArg,
+    log_equivalent_command,
     run,
 )
 from chimerax.core.errors import UserError
 
 from . import __version__, attach
-from .mdcif_data import MdcifFile, arrow_mesh, arrows, mode_frames
+from .mdcif_data import MEASURES, MdcifFile, arrow_mesh, arrows, measure, mode_frames
+from .plot import A_KIND, IMAGE_SUFFIXES, PLOT_MADE, Plot, atom_label, plots
+from .plot import save_image as _save_image
+from .plot import write_csv as _write_csv
 
 ScopeArg = EnumOf(["cluster", "global"])
+KindArg = EnumOf(list(MEASURES))
 MIN_ANIMATE_FRAMES = 3                  # sin() is 0 at every frame of a 1- or 2-frame cycle
+ANIMATE_DEFAULTS = (1, "cluster", 3.0, 30)      # mode, scope, amplitude, frames
 
 
 def _structures(models):
@@ -73,11 +84,14 @@ def _data(session, structure):
     return data, structure.mdcif_model
 
 
-def _keys(structure):
-    atoms = structure.atoms
+def _atom_keys(atoms):
     res = atoms.residues
     return [(str(c), str(n), str(a)) for c, n, a in zip(res.chain_ids, res.numbers, atoms.names,
                                                         strict=True)]
+
+
+def _keys(structure):
+    return _atom_keys(structure.atoms)
 
 
 def _mode_set(session, structure, scope):
@@ -119,7 +133,7 @@ def mdcif(session):
     auto = "on" if attach.is_registered(session) else "off (restart ChimeraX after installing)"
     session.logger.info(
         f"ChimeraX-MDCIF {__version__}. Subcommands: mdcif open | modes | morph | animate | "
-        f"porcupine. Attaching mdcif data to opened .cif files: {auto}.")
+        f"porcupine | plot. Attaching mdcif data to opened .cif files: {auto}.")
 
 
 mdcif_desc = CmdDesc(synopsis="Report mdcif bundle status")
@@ -205,6 +219,7 @@ def mdcif_animate(session, structure, mode=1, amplitude=3.0, frames=30, scope="c
     copy.position = structure.scene_position        # the copy is top level, the source may not be
     copy.mdcif_data, copy.mdcif_model, copy.mdcif_copy = data, model, True
     copy.mdcif_path = structure.mdcif_path          # data set before adding: the handler skips it
+    copy.mdcif_mode, copy.mdcif_scope, copy.mdcif_amplitude = mode, scope, float(amplitude)
     session.models.add([copy])
     structure.display = False
     spec = f"#{copy.id_string}"
@@ -259,4 +274,244 @@ mdcif_porcupine_desc = CmdDesc(
     keyword=[("mode", IntArg), ("scale", FloatArg), ("color", ColorArg), ("scope", ScopeArg),
              ("min_length", FloatArg), ("radius", FloatArg)],
     synopsis="Draw porcupine arrows for one mode of a model",
+)
+
+
+# --------------------------------------------------------------------------- plots
+
+def _alive(structure):
+    return structure is not None and not getattr(structure, "deleted", False)
+
+
+def _matches(copy, mode=None, scope=None, amplitude=None, frames=None):
+    """Whether an animate copy was made with these settings (None = any). Copies made before
+    0.3.0 don't record theirs and never match."""
+    have = (getattr(copy, "mdcif_mode", None), getattr(copy, "mdcif_scope", None),
+            getattr(copy, "mdcif_amplitude", None), copy.num_coordsets)
+    return have[0] is not None and all(w is None or w == h for w, h in zip(
+        (mode, scope, amplitude, frames), have, strict=True))
+
+
+def _animate(session, structure, mode=None, scope=None, amplitude=None, frames=None):
+    """'mdcif animate' for a plot, logged as that command; None takes its default. The copy
+    is marked as made for a plot, so a plot may close it when it animates again."""
+    mode, scope, amplitude, frames = (d if v is None else v for v, d in zip(
+        (mode, scope, amplitude, frames), ANIMATE_DEFAULTS, strict=True))
+    log_equivalent_command(session, f"mdcif animate #{structure.id_string} mode {mode} "
+                                    f"amplitude {amplitude:g} frames {frames} scope {scope}")
+    copy = mdcif_animate(session, structure, mode, amplitude, frames, scope)
+    setattr(copy, PLOT_MADE, True)
+    return copy
+
+
+def _values(structure, keys, kind):
+    """``kind`` of the atoms ``keys`` at every coordinate set of ``structure``, in id order
+    (read by coord index, as ChimeraX keeps the slots of deleted atoms)."""
+    index = {}
+    for i, k in enumerate(_keys(structure)):
+        index.setdefault(k, i)
+    missing = [k for k in keys if k not in index]
+    if missing:
+        raise UserError(f"#{structure.id_string} has no atom {atom_label(missing[0])}")
+    ci = structure.atoms.coord_indices[[index[k] for k in keys]]
+    xyz = np.array([structure.coordset(int(c)).xyzs[ci] for c in sorted(structure.coordset_ids)])
+    return measure(xyz, kind)
+
+
+def _of_file(structure, path):
+    """Whether ``structure`` has the mdcif data of file ``path``. By path, not by data object:
+    a restored session attaches the copies' data separately from the models'."""
+    data = getattr(structure, "mdcif_data", None)
+    return data is not None and attach.path_key(data.path) == attach.path_key(path)
+
+
+def _model_structure(session, path, model):
+    """The open structure of a file's model (not an animate copy), or None."""
+    from chimerax.atomic import AtomicStructure
+
+    for s in session.models.list(type=AtomicStructure):
+        if (_of_file(s, path) and getattr(s, "mdcif_model", None) == model
+                and not getattr(s, "mdcif_copy", False) and _alive(s)):
+            return s
+    return None
+
+
+def _shown_copies(session, structure):
+    """The shown animate copies of the model ``structure`` (same file and model), by id."""
+    from chimerax.atomic import AtomicStructure
+
+    path, model = structure.mdcif_data.path, structure.mdcif_model
+    return sorted((s for s in session.models.list(type=AtomicStructure)
+                   if getattr(s, "mdcif_copy", False) and _alive(s) and s.display
+                   and _of_file(s, path) and getattr(s, "mdcif_model", None) == model),
+                  key=lambda s: s.id)
+
+
+def copy_for(session, structure, mode=None, scope=None, amplitude=None, frames=None,
+             new=False):
+    """The animation atoms of ``structure`` are measured on: ``(copy, source)``.
+
+    Atoms on an animate copy made with the settings given (None = any) use that copy. Atoms on
+    a model (unless ``new``) use the newest copy a plot animated from it with these settings,
+    else a shown copy of that model with these settings (also one the user made with 'mdcif
+    animate', or one restored from a session). Otherwise a new copy is animated ('mdcif
+    animate', default mode 1, cluster, 3 sd, 30 frames); other settings on a copy animate the
+    copy anew. ``source``: the model the copy animates, if known. Whether a plot may close the
+    copy later depends on who made it (``Plot.own``), not on how it was found.
+    """
+    _data(session, structure)
+    wanted = (mode, scope, amplitude, frames)
+    live = [p for p in plots(session) if p.alive]
+    if getattr(structure, "mdcif_copy", False):
+        if _matches(structure, *wanted):
+            return structure, next((p.source for p in reversed(live)
+                                    if p.structure is structure and p.source is not None), None)
+    elif not new:
+        found = ([p.structure for p in live if p.source is structure
+                  and _matches(p.structure, *wanted)]
+                 or [s for s in _shown_copies(session, structure) if _matches(s, *wanted)])
+        if found:
+            return found[-1], structure
+    return _animate(session, structure, *wanted), structure
+
+
+def plot_for(session, kind, structure, mode=None, scope=None, amplitude=None, frames=None,
+             new=False):
+    """The plot (found or new) that atoms of ``structure`` are measured in: the plot of
+    ``kind`` on the copy from ``copy_for``, unless ``new`` (which on a model also means a new
+    copy). A new plot joins ``plots(session)`` with its first series."""
+    copy, source = copy_for(session, structure, mode, scope, amplitude, frames, new)
+    if not new:
+        found = [p for p in plots(session) if p.alive and p.structure is copy and p.kind == kind]
+        if found:
+            return found[-1]
+    return Plot(kind, copy, source)
+
+
+def add_series(session, plot, keys):
+    """Measure the atoms ``keys`` on the plot's copy and add them to the plot (registered in
+    the session if new); logs the range. Atoms already in the plot, also in reverse order
+    (the same distance, angle or dihedral), are not added twice."""
+    if not plot.alive:
+        raise UserError(f"{plot.spec}, the animation of this plot, was closed")
+    keys = [tuple(k) for k in keys]
+    same = next((s for s in plot.series if s.keys in (keys, keys[::-1])), None)
+    if same is not None:
+        session.logger.info(f"{plot.spec} {plot.kind} {same.label} is already plotted")
+        return same
+    values = _values(plot.structure, keys, plot.kind)
+    try:
+        series = plot.add(keys, values)
+    except ValueError as exc:
+        raise UserError(str(exc)) from None
+    if plot not in plots(session):
+        plots(session).append(plot)
+    p = 2 if plot.kind == "distance" else 1
+    session.logger.info(f"{plot.spec} {plot.kind} {series.label} along {plot.describe()}: "
+                        f"min {values.min():.{p}f}, max {values.max():.{p}f}, "
+                        f"mean {values.mean():.{p}f} {plot.unit}")
+    plot.changed()
+    return series
+
+
+def reanimate(session, plot, model=None, mode=None, scope=None, amplitude=None, frames=None):
+    """Animate a plot again with other settings (None = keep) and measure its series anew.
+
+    The new copy is made from the model's structure (for the same model: the plot's source,
+    else the model, else the old copy). The old copy is then closed if the plot made it and
+    no other plot uses it, else stopped and hidden. Returns the new copy.
+    """
+    model = plot.model if model is None else model
+    mode, scope, amplitude, frames = (old if v is None else v for v, old in zip(
+        (mode, scope, amplitude, frames),
+        (plot.mode, plot.scope, plot.amplitude, plot.n_frames), strict=True))
+    source = plot.source if model == plot.model and _alive(plot.source) else None
+    source = source or _model_structure(session, plot.path, model)
+    if source is None and model == plot.model and plot.alive:
+        source = plot.structure
+    if source is None:
+        raise UserError(f"no structure of model {model} of {os.path.basename(plot.path)} is "
+                        "open")
+    copy = _animate(session, source, mode, scope, amplitude, frames)
+    try:
+        values = [_values(copy, s.keys, plot.kind) for s in plot.series]
+    except UserError:
+        session.models.close([copy])
+        raise
+    old, old_own = plot.structure, plot.own
+    plot.set_animation(copy, source)
+    for s, v in zip(plot.series, values, strict=True):
+        s.values = v
+    if _alive(old) and old is not copy:
+        if old_own and not any(p.structure is old for p in plots(session)):
+            session.models.close([old])
+        else:
+            run(session, f"coordset stop #{old.id_string}", log=False)
+            old.display = False
+    plot.changed()
+    return copy
+
+
+def _check_target(option, path):
+    """Refuse a file that can't be written before anything is animated or added."""
+    full = os.path.abspath(os.path.expanduser(str(path)))
+    folder = os.path.dirname(full)
+    if os.path.isdir(full):
+        raise UserError(f"{option} {path}: that is a folder, not a file")
+    if not os.path.isdir(folder):
+        raise UserError(f"{option} {path}: there is no folder {folder}")
+    if not os.access(folder, os.W_OK) or (os.path.exists(full) and not os.access(full, os.W_OK)):
+        raise UserError(f"{option} {path}: not allowed to write there")
+
+
+def _save(session, plot, path, what):
+    try:
+        (_write_csv if what == "data" else _save_image)(plot, path)
+    except (OSError, ValueError) as exc:
+        raise UserError(f"could not save the plot {what}: {exc}") from None
+    session.logger.info(f"{plot.spec} {plot.kind} plot: {what} saved to {path}")
+
+
+def mdcif_plot(session, kind, atoms, mode=None, scope=None, amplitude=None, frames=None,
+               new=False, save_data=None, save_image=None):
+    """Plot a distance, angle or dihedral at every frame of a mode animation.
+
+    ``atoms``: 2, 3 or 4 atoms of one structure, in the order given ('sel' keeps the picking
+    order). The animation and plot are chosen as in ``plot_for``. With the GUI the plot's
+    window opens (or is updated); ``save_data`` (CSV) / ``save_image`` (PNG, SVG, PDF) write
+    the whole plot, every series. Returns this series' values, one per frame.
+    """
+    structures = list(atoms.unique_structures)        # before the count: ':10@CA :40@CA'
+    if len(structures) > 1:                         # with several models open
+        ids = ", ".join(f"#{s.id_string}" for s in structures)
+        raise UserError(f"the atoms must be in one structure, not {ids} (give the model, e.g. "
+                        "#1.1/A:10@CA)")
+    n = MEASURES[kind]
+    if len(atoms) != n:
+        raise UserError(f"{A_KIND[kind]} needs {n} atoms, got {len(atoms)} (used in the order "
+                        "given; 'sel' keeps the picking order)")
+    if save_image is not None and os.path.splitext(save_image)[1].lower() not in IMAGE_SUFFIXES:
+        raise UserError(f"saveImage {save_image}: the image must be "
+                        f"{', '.join(IMAGE_SUFFIXES)}")
+    for option, path in (("saveData", save_data), ("saveImage", save_image)):
+        if path is not None:                        # a bad file changes nothing
+            _check_target(option, path)
+    plot = plot_for(session, kind, structures[0], mode, scope, amplitude, frames, new)
+    series = add_series(session, plot, _atom_keys(atoms))
+    if session.ui.is_gui:
+        from .tool import show_plot
+
+        show_plot(session, plot)
+    if save_data is not None:
+        _save(session, plot, save_data, "data")
+    if save_image is not None:
+        _save(session, plot, save_image, "image")
+    return series.values
+
+
+mdcif_plot_desc = CmdDesc(
+    required=[("kind", KindArg), ("atoms", AtomsArg)],
+    keyword=[("mode", IntArg), ("scope", ScopeArg), ("amplitude", FloatArg), ("frames", IntArg),
+             ("new", BoolArg), ("save_data", SaveFileNameArg), ("save_image", SaveFileNameArg)],
+    synopsis="Plot a distance, angle or dihedral along a mode animation",
 )

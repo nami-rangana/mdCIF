@@ -16,7 +16,7 @@ build-backend = "chimerax.bundle_builder.cx_pep517"
 name = "ChimeraX-MDCIF"
 license = { text = "MIT" }
 authors = [{ name = "The mdcif authors" }]
-description = "Read mdcif files (opened as usual or with 'mdcif open'): switch between MD cluster models, animate essential modes, draw porcupine plots"
+description = "Read mdcif files (opened as usual or with 'mdcif open'): switch between MD cluster models, animate essential modes, draw porcupine plots, plot distances/angles/dihedrals along a mode"
 dependencies = ["ChimeraX-Core ~=1.7"]   # Python >= 3.10 (zip strict)
 dynamic = ["classifiers", "requires-python", "version"]
 
@@ -24,8 +24,10 @@ dynamic = ["classifiers", "requires-python", "version"]
 content-type = "text"
 text = """Viewer for mdcif files (MD trajectories summarized as PDB-IHM-compatible
 mmCIF): switch between cluster representatives, animate each model along its
-own PCA / quasi-harmonic modes, and draw porcupine plots. mdcif files opened
-the normal way (open, File > Open, drag and drop) get their mode data too."""
+own PCA / quasi-harmonic modes, draw porcupine plots, and plot a distance,
+angle or dihedral at every frame of a mode animation (command 'mdcif plot',
+tool MDCIF Plot). mdcif files opened the normal way (open, File > Open, drag
+and drop) get their mode data too."""
 
 [tool.setuptools.dynamic]
 version = { attr = "src.__version__" }
@@ -60,3 +62,11 @@ description = "Animate a model along one of its essential modes"
 [tool.chimerax.command."mdcif porcupine"]
 category = "Structure Analysis"
 description = "Draw porcupine arrows for one mode of a model"
+
+[tool.chimerax.command."mdcif plot"]
+category = "Structure Analysis"
+description = "Plot a distance, angle or dihedral along a mode animation"
+
+[tool.chimerax.tool."MDCIF Plot"]
+category = "Structure Analysis"
+description = "Plot distances, angles or dihedrals at every frame of a mode animation"

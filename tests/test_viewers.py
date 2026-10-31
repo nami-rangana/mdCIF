@@ -6,7 +6,9 @@ chimerax modules (ChimeraX itself is not installable with pip): this checks the
 command logic, not the ChimeraX API.
 """
 
+import csv
 import importlib.util
+import os
 import sys
 import types
 from pathlib import Path
@@ -130,6 +132,35 @@ def test_morph_frames(vdata):
     assert vdata.morph_frames([a, b], steps=4, wrap=False).shape == (5, 4, 3)
 
 
+def test_measure(vdata):
+    distances = pytest.importorskip("MDAnalysis.lib.distances")
+    assert vdata.measure([[[0, 0, 0], [3, 4, 0]]], "distance") == pytest.approx([5.0])
+    assert vdata.measure([[[1, 0, 0], [0, 0, 0], [0, 2, 0]]], "angle") == pytest.approx([90.0])
+    assert vdata.measure([[[1, 0, 0], [0, 0, 0], [-1, 0, 0]]], "angle") == pytest.approx([180.0])
+    p = np.random.default_rng(2).normal(size=(50, 4, 3))
+    ref = np.degrees(distances.calc_dihedrals(*(p[:, i] for i in range(4))))   # IUPAC sign
+    one_by_one = np.array([vdata.measure(f[None], "dihedral")[0] for f in p])
+    np.testing.assert_allclose(one_by_one, ref, atol=1e-3)        # MDAnalysis: float32
+    ref_angle = np.degrees(distances.calc_angles(*(p[:, i] for i in range(3))))
+    np.testing.assert_allclose(vdata.measure(p[:, :3], "angle"), ref_angle, atol=1e-3)
+    # a dihedral swinging across 180: unwrapped along the frames, frame 1 in (-180, 180]
+    t = np.radians(np.arange(150, 260, 10))
+    sweep = np.zeros((len(t), 4, 3))
+    sweep[:, 0], sweep[:, 2] = (1, 0, 0), (0, 0, 1)
+    sweep[:, 3] = np.column_stack([np.cos(t), np.sin(t), np.ones_like(t)])
+    d = vdata.measure(sweep, "dihedral")
+    assert d[0] == pytest.approx(150) and np.allclose(np.diff(d), 10)    # 150 ... 250
+    wrapped = np.degrees(distances.calc_dihedrals(*sweep.transpose(1, 0, 2)))   # -180 ... 180
+    assert np.abs(np.diff(wrapped)).max() > 300
+    np.testing.assert_allclose(180 - (180 - d) % 360, wrapped, atol=1e-3)
+    flat = [[[1, 0, 0], [0, 0, 0], [0, 0, 1], [-1, 0, 1]]]       # trans: +180, never -180
+    assert vdata.measure(flat, "dihedral")[0] == 180.0
+    with pytest.raises(ValueError, match="unknown"):
+        vdata.measure(p, "torsion")
+    with pytest.raises(ValueError, match="needs points"):
+        vdata.measure(p[:, :3], "dihedral")
+
+
 # --------------------------------------------------------------------------- PyMOL
 
 @pytest.fixture(scope="module")
@@ -185,11 +216,29 @@ class _Atoms:
         return len(self.names)
 
 
+class _Picked:
+    """What AtomsArg gives a command: atoms in the order typed and their structures."""
+
+    def __init__(self, *pairs):                 # (structure, key) pairs
+        keys = [k for _, k in pairs]
+        self.names = [k[2] for k in keys]
+        self.residues = _Residues(keys)
+        self.unique_structures = list(dict.fromkeys(s for s, _ in pairs))
+
+    def __len__(self):
+        return len(self.names)
+
+
+def _pick(structure, *indices):
+    return _Picked(*[(structure, structure.keys[i]) for i in indices])
+
+
 class _Model:
     _next = [1]
 
     def __init__(self, name=""):
         self.name, self.children, self.display, self.parent = name, [], True, None
+        self.deleted = False
         self.id = (_Model._next[0],)
         self.scene_position = object()          # stand-in for a Place
         _Model._next[0] += 1
@@ -276,8 +325,9 @@ def chimerax_cmd(monkeypatch):
         pass
 
     commands = types.ModuleType("chimerax.core.commands")
-    for n in ("BoolArg", "ColorArg", "FloatArg", "IntArg", "OpenFileNameArg"):
+    for n in ("BoolArg", "ColorArg", "FloatArg", "IntArg", "OpenFileNameArg", "SaveFileNameArg"):
         setattr(commands, n, n)
+    commands.log_equivalent_command = lambda session, text: session.logger.commands.append(text)
     commands.CmdDesc = lambda **kw: kw
     commands.EnumOf = lambda values: ("EnumOf", tuple(values))
     commands.FileNameArg = types.SimpleNamespace(unparse=lambda path: f"<{path}>")
@@ -298,12 +348,13 @@ def chimerax_cmd(monkeypatch):
     modules["chimerax.atomic"].AtomicStructure = _Structure
     modules["chimerax.atomic"].AtomicStructureArg = "AtomicStructureArg"
     modules["chimerax.atomic"].AtomicStructuresArg = "AtomicStructuresArg"
+    modules["chimerax.atomic"].AtomsArg = "AtomsArg"
     for k, v in modules.items():
         monkeypatch.setitem(sys.modules, k, v)
     pkg = types.ModuleType("mdcif_chimerax")
     pkg.__path__ = [str(CHIMERAX_SRC)]
     monkeypatch.setitem(sys.modules, "mdcif_chimerax", pkg)
-    for sub in ("__init__", "mdcif_data", "attach", "cmd"):
+    for sub in ("__init__", "mdcif_data", "attach", "plot", "cmd"):
         name = "mdcif_chimerax" if sub == "__init__" else f"mdcif_chimerax.{sub}"
         spec = importlib.util.spec_from_file_location(name, CHIMERAX_SRC / f"{sub}.py")
         module = importlib.util.module_from_spec(spec)
@@ -316,7 +367,7 @@ def chimerax_cmd(monkeypatch):
 
 class _Logger:
     def __init__(self):
-        self.lines = []
+        self.lines, self.commands = [], []      # commands: log_equivalent_command
 
     def info(self, text, **kw):
         self.lines.append(text)
@@ -347,7 +398,9 @@ class _Session:
 
     def __init__(self, vdata, seed=1, bundle_init=True):
         self.logger, self.models_added, self.triggers = _Logger(), [], _Triggers()
-        self.models = types.SimpleNamespace(add=self.add_models)
+        self.models = types.SimpleNamespace(add=self.add_models, list=self.list_models,
+                                            close=self.close_models)
+        self.ui = types.SimpleNamespace(is_gui=False)
         self._vdata, self._rng = vdata, np.random.default_rng(seed)
         if bundle_init:
             sys.modules["mdcif_chimerax"].bundle_api.initialize(self, None)
@@ -355,6 +408,15 @@ class _Session:
     def add_models(self, models):
         self.models_added.extend(models)
         self.triggers.activate_trigger("add models", [a for m in models for a in m.all_models()])
+
+    def list_models(self, type=None):
+        found = [a for m in self.models_added for a in m.all_models() if not a.deleted]
+        return [m for m in found if type is None or isinstance(m, type)]
+
+    def close_models(self, models):
+        for m in models:
+            for a in m.all_models():
+                a.deleted = True
 
     def structures_for(self, path, n=None):
         f = self._vdata.MdcifFile(path)
@@ -409,6 +471,8 @@ def test_chimerax_commands(chimerax_cmd, vdata, adk_mdcif):
     assert copy.position is opened[0].scene_position
     assert (copy.mdcif_data, copy.mdcif_model) == (opened[0].mdcif_data, 1)
     assert copy.mdcif_copy is True and copy.mdcif_path == str(path)
+    assert (copy.mdcif_mode, copy.mdcif_scope, copy.mdcif_amplitude) == (1, "cluster", -2.0)
+    assert ("mdcif_amplitude", "MDCIF", float) in _Structure.registered
     assert len(_summaries(session, path)) == 2               # the handler left the copy alone
     copy2 = cmd.mdcif_animate(session, opened[1], mode=1, frames=6, scope="global")
     assert copy2.coordsets.shape[0] == 6 and copy2.name != copy.name
@@ -542,3 +606,214 @@ def test_mdcif_byte_scan(chimerax_cmd, adk_mdcif, tmp_path):
     big.write_bytes(b"x" * 13 + b"_mdcif" + b"\n" * 40)
     assert not attach.has_mdcif_categories(big, chunk=16)
     assert not attach.has_mdcif_categories(tmp_path / "missing.cif")
+
+
+def _ca(structure):
+    return [i for i, k in enumerate(structure.keys) if k[2] == "CA"]
+
+
+def _distance(structure, i, j):
+    xyz = structure.coordsets
+    return np.linalg.norm(xyz[:, i] - xyz[:, j], axis=1)
+
+
+def test_chimerax_plot(chimerax_cmd, vdata, adk_mdcif, tmp_path):
+    cmd, ran, UserError = chimerax_cmd
+    plot_module = sys.modules["mdcif_chimerax.plot"]
+    path = adk_mdcif[0]
+    _, session, opened = _open_standins(cmd, vdata, path)
+    model, ca = opened[0], _ca(opened[0])
+    n_added = len(session.models_added)
+    d1 = cmd.mdcif_plot(session, "distance", _pick(model, ca[9], ca[39]))
+    copy = session.models_added[-1]                          # animated for the plot (defaults)
+    assert len(session.models_added) == n_added + 1 and copy.mdcif_copy and model.display is False
+    assert session.logger.commands == [f"mdcif animate #{model.id_string} mode 1 amplitude 3 "
+                                       "frames 30 scope cluster"]
+    assert ran[-1] == f"coordset #{copy.id_string} 1,30 loop 1000"
+    assert d1.shape == (30,) and np.ptp(d1) > 0
+    np.testing.assert_allclose(d1, _distance(copy, ca[9], ca[39]))
+    [plot] = plot_module.plots(session)
+    assert plot.structure is copy and plot.source is model and plot.kind == "distance"
+    label = plot.series[0].label
+    assert label == f"/4AKE:{model.keys[ca[9]][1]}@CA - /4AKE:{model.keys[ca[39]][1]}@CA"
+    assert session.logger.lines[-1].startswith(f"#{copy.id_string} distance {label} along "
+                                               "cluster mode 1 of model 1, +/-3 sd, 30 frames")
+    assert session.logger.lines[-1].endswith(f"mean {d1.mean():.2f} A")
+
+    # the model again (no settings: any of its plot copies) and the copy itself: same plot
+    cmd.mdcif_plot(session, "distance", _pick(model, ca[11], ca[37]))
+    cmd.mdcif_plot(session, "distance", _pick(copy, ca[0], ca[50]))
+    cmd.mdcif_plot(session, "distance", _pick(copy, ca[0], ca[50]))      # not added twice,
+    cmd.mdcif_plot(session, "distance", _pick(copy, ca[50], ca[0]))      # also not reversed
+    assert session.logger.lines[-1].endswith("is already plotted")
+    assert len(session.models_added) == n_added + 1 and len(plot.series) == 3
+    assert [s.color for s in plot.series] == plot_module.COLORS[:3]
+    np.testing.assert_allclose(plot.series[2].values, _distance(copy, ca[0], ca[50]))
+    # the whole plot (every series) as CSV and as an image
+    data, image = tmp_path / "d.csv", tmp_path / "d.png"
+    again = cmd.mdcif_plot(session, "distance", _pick(model, ca[9], ca[39]),
+                           save_data=str(data), save_image=str(image))
+    np.testing.assert_array_equal(again, d1)                 # the first series, not added again
+    lines = data.read_text().splitlines()
+    assert lines[0].startswith("# mdcif plot (ChimeraX-MDCIF 0.3.0)")
+    for item in (f"# file: {path}", "# model: 1 (", "# scope: cluster", "# mode: 1",
+                 "# amplitude: 3 sd", "# frames: 30", "# kind: distance (A)"):
+        assert any(line.startswith(item) for line in lines if line.startswith("#")), item
+    rows = list(csv.reader(line for line in lines if not line.startswith("#")))
+    assert rows[0] == ["frame"] + [s.label for s in plot.series]
+    table = np.array(rows[1:], float)
+    assert table.shape == (30, 4) and np.array_equal(table[:, 0], np.arange(1, 31))
+    np.testing.assert_allclose(table[:, 1:].T, [s.values for s in plot.series], rtol=1e-5)
+    png = image.read_bytes()
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert (int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big")) == (1800, 1050)
+    for suffix, magic in ((".svg", b"<?xml"), (".pdf", b"%PDF")):
+        plot_module.save_image(plot, tmp_path / f"d{suffix}")
+        assert (tmp_path / f"d{suffix}").read_bytes().startswith(magic)
+    assert plot_module.frame_ticks(30) == [1, 5, 10, 15, 20, 25, 30]     # frame 1 labelled
+    assert plot_module.frame_ticks(12) == [1, 2, 4, 6, 8, 10, 12]
+    assert plot_module.frame_ticks(3) == [1, 2, 3]
+    from matplotlib.figure import Figure
+
+    marker = plot_module.draw(Figure(), plot, current=4)
+    assert all(a.get_animated() for a in marker.artists)     # left out of full draws: blitted
+    assert plot_module.draw(Figure(), plot_module.Plot("distance", copy), current=4) is None
+
+    # other kinds: their own plots on the same animation, also when picked on the model
+    angle = cmd.mdcif_plot(session, "angle", _pick(model, ca[5], ca[6], ca[7]))
+    dihedral = cmd.mdcif_plot(session, "dihedral", _pick(copy, *ca[5:9]))
+    assert len(session.models_added) == n_added + 1 and len(plot_module.plots(session)) == 3
+    assert np.all((angle > 0) & (angle < 180))
+    np.testing.assert_allclose(dihedral, vdata.measure(copy.coordsets[:, ca[5:9]], "dihedral"))
+    assert all(p.structure is copy and p.own for p in plot_module.plots(session))
+    cmd.mdcif_plot(session, "angle", _pick(copy, ca[7], ca[6], ca[5]))   # reversed: the same
+    cmd.mdcif_plot(session, "dihedral", _pick(copy, *ca[8:4:-1]))
+    assert [len(p.series) for p in plot_module.plots(session)] == [3, 1, 1]
+    plot_module.write_csv(plot_module.plots(session)[2], tmp_path / "t.csv")
+    assert "# dihedrals unwrapped from frame 1" in (tmp_path / "t.csv").read_text()
+    assert "unwrapped" not in data.read_text()
+    # new true: another plot of the same copy; other settings: a new animation (of the copy)
+    cmd.mdcif_plot(session, "distance", _pick(copy, ca[1], ca[2]), new=True)
+    assert len(plot_module.plots(session)) == 4 and len(session.models_added) == n_added + 1
+    cmd.mdcif_plot(session, "distance", _pick(copy, ca[1], ca[2]), mode=2, frames=10)
+    copy2 = session.models_added[-1]
+    assert copy2 is not copy and (copy2.mdcif_mode, copy2.num_coordsets) == (2, 10)
+    assert plot_module.plots(session)[-1].structure is copy2
+
+    # bad input: nothing animated, nothing added
+    n_added, n_plots = len(session.models_added), len(plot_module.plots(session))
+    with pytest.raises(UserError, match="a dihedral needs 4 atoms, got 3"):
+        cmd.mdcif_plot(session, "dihedral", _pick(copy, *ca[:3]))
+    with pytest.raises(UserError, match="must be in one structure"):
+        cmd.mdcif_plot(session, "distance", _Picked((opened[0], opened[0].keys[ca[0]]),
+                                                    (opened[1], opened[1].keys[ca[1]])))
+    with pytest.raises(UserError, match="must be in one structure"):    # before the count
+        cmd.mdcif_plot(session, "distance", _Picked(*[(s, s.keys[ca[0]]) for s in opened[:3]]))
+    with pytest.raises(UserError, match="image must be"):
+        cmd.mdcif_plot(session, "distance", _pick(model, ca[3], ca[4]), save_image="d.jpg")
+    with pytest.raises(UserError, match="no mdcif data"):
+        cmd.mdcif_plot(session, "distance",
+                       _pick(_Structure([("A", "1", "CA"), ("A", "2", "CA")], np.zeros((2, 3))),
+                             0, 1))
+    locked = tmp_path / "locked"
+    locked.mkdir(mode=0o500)
+    targets = [({"save_data": str(tmp_path / "missing" / "d.csv")}, "there is no folder"),
+               ({"save_image": str(tmp_path / "missing" / "d.png")}, "there is no folder"),
+               ({"save_data": str(tmp_path)}, "that is a folder")]
+    if not os.access(locked, os.W_OK):                      # (root can write anywhere)
+        targets.append(({"save_image": str(locked / "d.png")}, "not allowed to write there"))
+    for kw, message in targets:                              # checked before animating
+        with pytest.raises(UserError, match=message):
+            cmd.mdcif_plot(session, "distance", _pick(model, ca[3], ca[4]), mode=3, **kw)
+    assert len(session.models_added) == n_added
+    assert len(plot_module.plots(session)) == n_plots and len(plot.series) == 3
+
+
+def test_chimerax_plot_reanimate(chimerax_cmd, vdata, adk_mdcif):
+    cmd, ran, UserError = chimerax_cmd
+    plot_module = sys.modules["mdcif_chimerax.plot"]
+    _, session, opened = _open_standins(cmd, vdata, adk_mdcif[0])
+    ca = _ca(opened[0])
+    cmd.mdcif_plot(session, "distance", _pick(opened[0], ca[9], ca[39]))
+    [plot] = plot_module.plots(session)
+    first, heard = plot.structure, []
+    plot.listeners.append(heard.append)                      # as a window does
+    new = cmd.reanimate(session, plot, mode=2, frames=12)
+    assert first.deleted and plot.structure is new and heard == [plot]   # its own copy: closed
+    assert (plot.mode, plot.n_frames, new.num_coordsets, plot.source) == (2, 12, 12, opened[0])
+    np.testing.assert_allclose(plot.series[0].values, _distance(new, ca[9], ca[39]))
+    other = cmd.reanimate(session, plot, model=2)            # from model 2's structure
+    assert other.mdcif_model == 2 and plot.source is opened[1] and new.deleted
+    assert (plot.model, plot.mode, plot.n_frames) == (2, 2, 12)
+    with pytest.raises(UserError, match="no structure of model 3"):
+        opened[2].deleted = True
+        cmd.reanimate(session, plot, model=3)
+    assert plot.structure is other and not other.deleted
+
+    user = cmd.mdcif_animate(session, opened[0], mode=1, frames=8)     # a copy the user made
+    cmd.mdcif_plot(session, "angle", _pick(user, *ca[5:8]))
+    uplot = plot_module.plots(session)[-1]
+    assert uplot.structure is user and not uplot.own
+    cmd.reanimate(session, uplot, amplitude=1.5)
+    assert not user.deleted and user.display is False                  # stopped and hidden
+    assert f"coordset stop #{user.id_string}" in ran and uplot.amplitude == 1.5
+
+    session.models.close([uplot.structure])                  # the animation is closed
+    assert not uplot.alive and uplot not in plot_module.plots(session)  # no window: dropped
+    with pytest.raises(UserError, match="was closed"):
+        cmd.add_series(session, uplot, uplot.series[0].keys)
+    plot.listeners.clear()
+    session.models.close([plot.structure])
+    plot.listeners.append(heard.append)                      # a window keeps a closed plot
+    assert plot in plot_module.plots(session) and len(plot.series[0].values) == 12
+    revived = cmd.reanimate(session, plot)                   # animated again from model 2
+    assert plot.alive and revived.mdcif_model == 2 and plot.source is opened[1]
+
+
+def test_chimerax_plot_reuses_shown_copies(chimerax_cmd, vdata, adk_mdcif):
+    """Atoms on a model are measured on a copy already on screen (one the user made, one a
+    closed window's plot made, one restored from a session) instead of a second copy."""
+    cmd, ran, _ = chimerax_cmd
+    plot_module = sys.modules["mdcif_chimerax.plot"]
+    _, session, opened = _open_standins(cmd, vdata, adk_mdcif[0])
+    model, ca = opened[0], _ca(opened[0])
+    user = cmd.mdcif_animate(session, model, mode=2, frames=10)       # 'mdcif animate' by hand
+    n_added = len(session.models_added)
+    cmd.mdcif_plot(session, "distance", _pick(model, ca[9], ca[39]))  # no settings: any copy
+    [plot] = plot_module.plots(session)
+    assert len(session.models_added) == n_added and plot.structure is user
+    assert plot.source is model and not plot.own
+    np.testing.assert_allclose(plot.series[0].values, _distance(user, ca[9], ca[39]))
+    cmd.reanimate(session, plot, frames=12)                  # the user's copy: stopped, hidden
+    assert not user.deleted and user.display is False and f"coordset stop #{user.id_string}" in ran
+    assert plot.own and len(session.models_added) == n_added + 1
+
+    cmd.mdcif_plot(session, "angle", _pick(model, *ca[5:8]), mode=1)  # no copy with mode 1
+    made = session.models_added[-1]
+    assert len(session.models_added) == n_added + 2 and made.mdcif_mode == 1
+    plot_module.plots(session).clear()                       # windows closed / session restored
+    cmd.mdcif_plot(session, "dihedral", _pick(model, *ca[5:9]), mode=1)
+    found = plot_module.plots(session)[-1]
+    assert len(session.models_added) == n_added + 2          # found on screen again
+    assert found.structure is made and found.own and found.source is model
+    plot_module.plots(session).clear()
+    made.display = False                                     # hidden copies are not used
+    cmd.mdcif_plot(session, "dihedral", _pick(model, *ca[5:9]), mode=1)
+    assert len(session.models_added) == n_added + 3
+    cmd.mdcif_plot(session, "dihedral", _pick(model, *ca[5:9]), mode=1, new=True)
+    assert len(session.models_added) == n_added + 4          # new true: always a new copy
+    other = cmd.mdcif_animate(session, opened[1], mode=1, frames=30)  # another model's copy
+    shown = cmd._shown_copies(session, model)
+    assert other not in shown and made not in shown and user not in shown and len(shown) == 3
+
+    # a restored session attaches the copies' data apart from the models': matched by file
+    other.mdcif_data = vdata.MdcifFile(adk_mdcif[0])
+    assert other.mdcif_data is not opened[1].mdcif_data
+    assert cmd._shown_copies(session, opened[1]) == [other]
+    plot_module.plots(session).clear()
+    n_added = len(session.models_added)
+    cmd.mdcif_plot(session, "distance", _pick(opened[1], ca[9], ca[39]))
+    restored = plot_module.plots(session)[-1]
+    assert len(session.models_added) == n_added and restored.structure is other
+    cmd.reanimate(session, restored, model=1)                # the model found by file, too
+    assert restored.source is model and len(session.models_added) == n_added + 1
