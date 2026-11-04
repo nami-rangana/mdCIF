@@ -29,7 +29,8 @@ model's own modes (or the global PCs), and draw porcupine plots; in a Jupyter no
 `mdcif.view.MdcifViewer` does the same with py3Dmol.
 
 Worked example: GB1 folded with MELD × Amber, written as an edited copy of PDB 3GB1 —
-[examples/3gb1/](examples/3gb1/README.md).
+[examples/create/](examples/create/README.md) (three tutorials: the basics, your own
+clustering, the command line).
 
 See [docs/proposal.md](docs/proposal.md) for goals and milestones and
 [docs/spec/mdcif_spec.md](docs/spec/mdcif_spec.md) for the draft format.
@@ -120,7 +121,7 @@ clusters = cluster(traj, AnyEstimator(...))      # fit_predict on PCs 1-3; or la
 save_mdcif("out.cif", traj, clusters, provenance, reference="3GB1")
 ```
 
-The walkthrough notebook [examples/3gb1/mdcif_3gb1.ipynb](examples/3gb1/mdcif_3gb1.ipynb) does
+The walkthrough notebook [examples/create/1_basic/1_basic.ipynb](examples/create/1_basic/1_basic.ipynb) does
 this step by step on the GB1 MELD run, in plain language: PCA, clusters and medoids, the
 modes of each cluster, and a tour of the six new `_mdcif_` categories, with publication-style
 figures.
@@ -203,7 +204,7 @@ Walkthrough: [examples/view/python/view_mdcif.ipynb](examples/view/python/view_m
 
 Trajectories are never committed (see `.gitignore`). Tests use the small public adenylate
 kinase (AdK) trajectories shipped with `MDAnalysisTests`; the notebook uses the GB1 MELD replica
-in `examples/data/3gb1/` (see [examples/3gb1/](examples/3gb1/README.md)). Put any other local
+in `examples/data/3gb1/` (see [examples/create/](examples/create/README.md)). Put any other local
 data in `examples/data/`.
 
 ## License

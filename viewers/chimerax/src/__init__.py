@@ -13,7 +13,7 @@ The tool "MDCIF Plot" (Tools > Structure Analysis, also opened by ``mdcif plot``
 
 from chimerax.core.toolshed import BundleAPI
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 # Command name (as declared in pyproject.toml) -> function name in cmd.py
 _COMMANDS = {

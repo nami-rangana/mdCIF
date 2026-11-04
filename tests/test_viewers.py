@@ -633,7 +633,7 @@ def test_chimerax_plot(chimerax_cmd, vdata, adk_mdcif, tmp_path):
     assert d1.shape == (30,) and np.ptp(d1) > 0
     np.testing.assert_allclose(d1, _distance(copy, ca[9], ca[39]))
     [plot] = plot_module.plots(session)
-    assert plot.structure is copy and plot.source is model and plot.kind == "distance"
+    assert plot.structure is copy and plot.source is model and plot.kinds == ["distance"]
     label = plot.series[0].label
     assert label == f"/4AKE:{model.keys[ca[9]][1]}@CA - /4AKE:{model.keys[ca[39]][1]}@CA"
     assert session.logger.lines[-1].startswith(f"#{copy.id_string} distance {label} along "
@@ -655,7 +655,7 @@ def test_chimerax_plot(chimerax_cmd, vdata, adk_mdcif, tmp_path):
                            save_data=str(data), save_image=str(image))
     np.testing.assert_array_equal(again, d1)                 # the first series, not added again
     lines = data.read_text().splitlines()
-    assert lines[0].startswith("# mdcif plot (ChimeraX-MDCIF 0.3.0)")
+    assert lines[0].startswith("# mdcif plot (ChimeraX-MDCIF 0.4.0)")
     for item in (f"# file: {path}", "# model: 1 (", "# scope: cluster", "# mode: 1",
                  "# amplitude: 3 sd", "# frames: 30", "# kind: distance (A)"):
         assert any(line.startswith(item) for line in lines if line.startswith("#")), item
@@ -673,28 +673,60 @@ def test_chimerax_plot(chimerax_cmd, vdata, adk_mdcif, tmp_path):
     assert plot_module.frame_ticks(30) == [1, 5, 10, 15, 20, 25, 30]     # frame 1 labelled
     assert plot_module.frame_ticks(12) == [1, 2, 4, 6, 8, 10, 12]
     assert plot_module.frame_ticks(3) == [1, 2, 3]
+    assert [plot_module.frame_minor_step(n) for n in (3, 12, 30, 100, 1000)] == [None, 1, 1, 2,
+                                                                                20]
     from matplotlib.figure import Figure
 
-    marker = plot_module.draw(Figure(), plot, current=4)
+    figure = Figure()
+    marker = plot_module.draw(figure, plot, current=4)
+    assert len(figure.axes) == 1 and len(marker.artists) == 4    # the line + a dot each
     assert all(a.get_animated() for a in marker.artists)     # left out of full draws: blitted
-    assert plot_module.draw(Figure(), plot_module.Plot("distance", copy), current=4) is None
+    from matplotlib.lines import Line2D
 
-    # other kinds: their own plots on the same animation, also when picked on the model
+    assert all(isinstance(a, Line2D) for a in marker.artists)   # no scatter: 1.8 ms per draw
+    assert marker.line is marker.panels["distance"][0] and len(marker.dots) == 3
+    assert plot_module.draw(Figure(), plot_module.Plot(copy), current=4) is None
+
+    # other kinds: panels of the same plot (one plot per animation), also picked on the model
     angle = cmd.mdcif_plot(session, "angle", _pick(model, ca[5], ca[6], ca[7]))
     dihedral = cmd.mdcif_plot(session, "dihedral", _pick(copy, *ca[5:9]))
-    assert len(session.models_added) == n_added + 1 and len(plot_module.plots(session)) == 3
+    assert len(session.models_added) == n_added + 1 and plot_module.plots(session) == [plot]
+    assert plot.kinds == ["distance", "angle", "dihedral"]
+    assert session.logger.lines[-1].startswith(f"#{copy.id_string} dihedral /4AKE:")
+    assert session.logger.lines[-1].endswith(" deg")
     assert np.all((angle > 0) & (angle < 180))
     np.testing.assert_allclose(dihedral, vdata.measure(copy.coordsets[:, ca[5:9]], "dihedral"))
-    assert all(p.structure is copy and p.own for p in plot_module.plots(session))
     cmd.mdcif_plot(session, "angle", _pick(copy, ca[7], ca[6], ca[5]))   # reversed: the same
     cmd.mdcif_plot(session, "dihedral", _pick(copy, *ca[8:4:-1]))
-    assert [len(p.series) for p in plot_module.plots(session)] == [3, 1, 1]
-    plot_module.write_csv(plot_module.plots(session)[2], tmp_path / "t.csv")
-    assert "# dihedrals unwrapped from frame 1" in (tmp_path / "t.csv").read_text()
-    assert "unwrapped" not in data.read_text()
+    assert [len(plot.series_of(k)) for k in plot.kinds] == [3, 1, 1]
+    assert [s.color for s in plot.series_of("angle")] == plot_module.COLORS[:1]   # per panel
+    both, image3 = tmp_path / "t.csv", tmp_path / "t.png"
+    cmd.mdcif_plot(session, "angle", _pick(copy, *ca[5:8]), save_data=str(both),
+                   save_image=str(image3))
+    assert session.logger.lines[-1] == (f"#{copy.id_string} distance + angle + dihedral plot: "
+                                        f"image saved to {image3}")
+    text = both.read_text()
+    assert "# kind: distance (A), angle (deg), dihedral (deg)\n" in text
+    assert "# dihedrals unwrapped from frame 1" in text and "unwrapped" not in data.read_text()
+    rows = list(csv.reader(line for line in text.splitlines() if not line.startswith("#")))
+    assert rows[0] == ["frame"] + [s.label for s in plot.series]       # 2, 3, 4 atoms
+    png = image3.read_bytes()                                # 3 panels: 3.5 + 2 * 2.2 in high
+    assert (int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big")) == (1800, 2370)
+    figure = Figure()
+    marker = plot_module.draw(figure, plot, current=4)
+    assert len(figure.axes) == 3 and len(marker.artists) == 3 + 5
+    assert [ax.get_ylabel() for ax in figure.axes] == ["Distance (Å)", "Angle (°)",
+                                                       "Dihedral (°)"]
+    marker.set(7)
+    for kind, (line, _) in marker.panels.items():
+        assert list(line.get_xdata()) == [7, 7]
+        np.testing.assert_array_equal(marker.points(kind),
+                                      [[7, s.values[6]] for s in plot.series_of(kind)])
+    marker.set(31)                                           # past the end: no dots
+    assert np.isnan(marker.points("angle")[:, 1]).all()
     # new true: another plot of the same copy; other settings: a new animation (of the copy)
     cmd.mdcif_plot(session, "distance", _pick(copy, ca[1], ca[2]), new=True)
-    assert len(plot_module.plots(session)) == 4 and len(session.models_added) == n_added + 1
+    assert len(plot_module.plots(session)) == 2 and len(session.models_added) == n_added + 1
     cmd.mdcif_plot(session, "distance", _pick(copy, ca[1], ca[2]), mode=2, frames=10)
     copy2 = session.models_added[-1]
     assert copy2 is not copy and (copy2.mdcif_mode, copy2.num_coordsets) == (2, 10)
@@ -725,8 +757,82 @@ def test_chimerax_plot(chimerax_cmd, vdata, adk_mdcif, tmp_path):
     for kw, message in targets:                              # checked before animating
         with pytest.raises(UserError, match=message):
             cmd.mdcif_plot(session, "distance", _pick(model, ca[3], ca[4]), mode=3, **kw)
+    with pytest.raises(UserError, match="is given twice"):
+        cmd.add_series(session, plot, [model.keys[ca[3]], model.keys[ca[3]]])
     assert len(session.models_added) == n_added
-    assert len(plot_module.plots(session)) == n_plots and len(plot.series) == 3
+    assert len(plot_module.plots(session)) == n_plots and len(plot.series) == 5
+
+
+def test_chimerax_plot_typed_atoms(chimerax_cmd):
+    """The window's atom boxes: residue number + atom name, matched to a structure's keys."""
+    plot_module = sys.modules["mdcif_chimerax.plot"]
+    parse, match = plot_module.parse_atom, plot_module.match_key
+    for text in ("38CA", "38 CA", "38@CA", ":38@CA", " 38ca ", "038CA"):
+        assert parse(text) == (None, 38, "CA"), text
+    for text in ("A:38CA", "/A:38@CA", "A:38 CA", "/A:38ca"):
+        assert parse(text) == ("A", 38, "CA"), text
+    assert parse("38@1HB") == (None, 38, "1HB") and parse("-2@CA") == (None, -2, "CA")
+    assert parse("4AKE:5@OD1") == ("4AKE", 5, "OD1") and parse("12C4'") == (None, 12, "C4'")
+    for text in ("abc", "CA38", "38", "38@", "381HB CA", "#2/A:38@CA", "A38CA", "", "  "):
+        with pytest.raises(ValueError, match="e.g. 38CA"):
+            parse(text)
+
+    keys = [("A", "38", "N"), ("A", "38", "CA"), ("A", "38", "CB"), ("A", "39", "CA"),
+            ("B", "39", "CA"), ("b", "40", "CA"), ("A", "41", "Zn")]
+    assert match(parse("38CA"), keys) == ("A", "38", "CA")              # one chain: no chain
+    assert match(parse("A:38@CB"), keys) == ("A", "38", "CB")
+    assert match(parse("B:39CA"), keys) == ("B", "39", "CA")
+    assert match(parse("B:40CA"), keys) == ("b", "40", "CA")            # case only: taken
+    assert match(parse("41ZN"), keys) == ("A", "41", "Zn")
+    with pytest.raises(ValueError, match="39CA is in chains A, B: write A:39CA for chain A"):
+        match(parse("39CA"), keys)
+    with pytest.raises(ValueError, match=r"no atom /A:38@XX \(residue 38 has N, CA, CB\)"):
+        match(parse("38XX"), keys)
+    with pytest.raises(ValueError, match="no residue :99"):
+        match(parse("99CA"), keys)
+    with pytest.raises(ValueError, match="no residue /C:38"):
+        match(parse("C:38CA"), keys)
+
+    # '381HB' is residue 381, atom HB: the window then hints at the '@' rule
+    hint, rule = plot_module.digit_hint, "; a name that starts with a digit needs @, e.g. 38@1HB"
+    keys += [("A", "38", "1HB"), ("A", "9", "CA")]
+    assert hint("381HB", parse("381HB"), keys) == ("; did you mean 38@1HB? (a name that starts "
+                                                   "with a digit needs @)")
+    assert hint("A:381HB", parse("A:381HB"), keys).startswith("; did you mean A:38@1HB?")
+    for text in ("382HB", "99CA"):                           # no such residue: the rule
+        assert hint(text, parse(text), keys) == rule, text
+    for text in ("38@XX", "38XX", "5XX"):                    # '@' typed; residue 38 is there;
+        assert hint(text, parse(text), keys) == "", text     # one digit
+    no_digits = [k for k in keys if not k[2][:1].isdigit()]  # no such names: no reminder
+    assert hint("99CA", parse("99CA"), no_digits) == ""
+
+
+def test_chimerax_plot_panels(chimerax_cmd, vdata, adk_mdcif):
+    """Kinds by atom count, eight colours per panel, figure sizes."""
+    cmd, _, _ = chimerax_cmd
+    plot_module = sys.modules["mdcif_chimerax.plot"]
+    _, session, opened = _open_standins(cmd, vdata, adk_mdcif[0])
+    ca = _ca(opened[0])
+    copy = cmd.mdcif_animate(session, opened[0], frames=12)
+    plot = plot_module.Plot(copy)
+    keys = [copy.keys[i] for i in ca]
+    for k in range(8):
+        plot.add(keys[k:k + 2], np.zeros(12))
+    with pytest.raises(ValueError, match="at most 8 distances"):
+        plot.add(keys[20:22], np.zeros(12))
+    assert plot.add(keys[:4], np.zeros(12)).color == plot_module.COLORS[0]   # own panel
+    assert plot.kinds == ["distance", "dihedral"] and plot.series[-1].kind == "dihedral"
+    with pytest.raises(ValueError, match="needs 2, 3 or 4 atoms, got 5"):
+        plot.add(keys[:5], np.zeros(12))
+    assert plot_module.figure_size(1) == plot_module.IMAGE_SIZE == plot_module.figure_size(0)
+    assert plot_module.figure_size(3) == pytest.approx((6.0, 7.9))
+    assert plot_module.header(plot)[7] == "kind: distance (A), dihedral (deg)"
+    from matplotlib.figure import Figure
+
+    # legends: as many columns as fit across the panel
+    assert plot_module.legend_layout(Figure(figsize=(6, 3.5)), plot) == {"distance": 2}
+    assert plot_module.legend_layout(Figure(figsize=(16, 3.5)), plot) == {"distance": 4}
+    assert plot_module.legend_layout(Figure(figsize=(3.2, 2)), plot) == {"distance": 1}
 
 
 def test_chimerax_plot_reanimate(chimerax_cmd, vdata, adk_mdcif):
