@@ -42,7 +42,18 @@ def register(session):
         AtomicStructure.register_attr(session, name, REGISTRANT, attr_type=kind)
     unregister(session)
     _handlers[id(session)] = session.triggers.add_handler(
-        ADD_MODELS, lambda _trigger, models: on_add_models(session, models))
+        ADD_MODELS, lambda _trigger, models: _on_add_models(session, models))
+
+
+def _on_add_models(session, models):
+    """The handler: ``on_add_models``, which stops itself once the bundle's modules are gone
+    (uninstalled without the "bundle uninstalled" trigger, see ``__init__.py``)."""
+    try:
+        on_add_models(session, models)
+    except ModuleNotFoundError as exc:
+        if not (exc.name or "").startswith(__package__ or "chimerax.mdcif"):
+            raise
+        unregister(session)
 
 
 def unregister(session):

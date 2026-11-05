@@ -1,4 +1,4 @@
-"""Distance / angle / dihedral plots along a mode animation ('mdcif plot', the MDCIF Plot tool).
+"""Distance / angle / dihedral plots along a mode animation ('mdcif plot', MDCIF Analyze).
 
 A plot is one animation - an 'mdcif animate' copy, one coordinate set per frame - and the
 series measured on it, one per set of atoms; the number of atoms gives a series' kind (2 =
@@ -6,8 +6,8 @@ distance, 3 = angle, 4 = dihedral). Each kind present gets a panel, stacked in t
 one frame axis, with up to eight series. Atoms are kept as (chain, residue number, atom name)
 keys, so a plot can move to another model of the same file; ``parse_atom`` / ``match_key``
 turn typed atoms (``38CA``, ``A:38@CA``) into keys. The session's plots are in
-``plots(session)``: the command and the window (``tool.py``) add to the same ones, and a
-window listens to its plot through ``Plot.listeners``.
+``plots(session)``: the command and the Analyze window's Geometry tab (``geometry_tab.py``)
+add to the same ones, and a tab listens to its plot through ``Plot.listeners``.
 
 No Qt or ChimeraX imports here (matplotlib only, imported when drawing): the command saves
 images and CSV files without a window, and tests load this module without ChimeraX.

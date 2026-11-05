@@ -272,7 +272,7 @@ class _Structure(_Model):
     def __init__(self, keys, coords, name="s", filename=None):
         super().__init__(name)
         self.keys, self.atoms, self.coordsets = keys, _Atoms(keys, coords), None
-        self.filename = filename
+        self.filename, self.active_coordset_id = filename, 1
 
     @classmethod
     def register_attr(cls, session, name, registrant, attr_type=None):
@@ -309,6 +309,8 @@ class _Structure(_Model):
 
 
 class _Surface(_Model):
+    SESSION_SAVE_DRAWING = False                # as ChimeraX's Model: geometry not in sessions
+
     def __init__(self, name, session):
         super().__init__(name)
 
@@ -331,6 +333,7 @@ def chimerax_cmd(monkeypatch):
     commands.CmdDesc = lambda **kw: kw
     commands.EnumOf = lambda values: ("EnumOf", tuple(values))
     commands.FileNameArg = types.SimpleNamespace(unparse=lambda path: f"<{path}>")
+    commands.StringArg = types.SimpleNamespace(unparse=lambda text: f'"{text}"')
     commands.run = lambda session, text, log=True: (ran.append(text), session.run(text))[1]
     modules = {
         "chimerax": types.ModuleType("chimerax"),
@@ -339,12 +342,17 @@ def chimerax_cmd(monkeypatch):
         "chimerax.core.errors": types.ModuleType("chimerax.core.errors"),
         "chimerax.core.models": types.ModuleType("chimerax.core.models"),
         "chimerax.core.toolshed": types.ModuleType("chimerax.core.toolshed"),
+        "chimerax.core.triggerset": types.ModuleType("chimerax.core.triggerset"),
         "chimerax.atomic": types.ModuleType("chimerax.atomic"),
     }
     modules["chimerax.core.errors"].UserError = UserError
     modules["chimerax.core.models"].Surface = _Surface
     modules["chimerax.core.models"].ADD_MODELS = "add models"
+    toolshed = types.SimpleNamespace(triggers=_Triggers())
     modules["chimerax.core.toolshed"].BundleAPI = object
+    modules["chimerax.core.toolshed"].TOOLSHED_BUNDLE_UNINSTALLED = "bundle uninstalled"
+    modules["chimerax.core.toolshed"].get_toolshed = lambda: toolshed
+    modules["chimerax.core.triggerset"].DEREGISTER = _DEREGISTER
     modules["chimerax.atomic"].AtomicStructure = _Structure
     modules["chimerax.atomic"].AtomicStructureArg = "AtomicStructureArg"
     modules["chimerax.atomic"].AtomicStructuresArg = "AtomicStructuresArg"
@@ -354,7 +362,7 @@ def chimerax_cmd(monkeypatch):
     pkg = types.ModuleType("mdcif_chimerax")
     pkg.__path__ = [str(CHIMERAX_SRC)]
     monkeypatch.setitem(sys.modules, "mdcif_chimerax", pkg)
-    for sub in ("__init__", "mdcif_data", "attach", "plot", "cmd"):
+    for sub in ("__init__", "mdcif_data", "attach", "plot", "cmd", "menu"):
         name = "mdcif_chimerax" if sub == "__init__" else f"mdcif_chimerax.{sub}"
         spec = importlib.util.spec_from_file_location(name, CHIMERAX_SRC / f"{sub}.py")
         module = importlib.util.module_from_spec(spec)
@@ -375,6 +383,9 @@ class _Logger:
     warning = info
 
 
+_DEREGISTER = "delete handler"                  # chimerax.core.triggerset.DEREGISTER
+
+
 class _Triggers:
     def __init__(self):
         self.handlers = {}
@@ -388,8 +399,9 @@ class _Triggers:
         self.handlers[handler[0]].remove(handler)
 
     def activate_trigger(self, name, data):
-        for _, func in list(self.handlers.get(name, [])):
-            func(name, data)
+        for handler in list(self.handlers.get(name, [])):
+            if handler[1](name, data) == _DEREGISTER:
+                self.remove_handler(handler)
 
 
 class _Session:
@@ -460,6 +472,9 @@ def test_chimerax_commands(chimerax_cmd, vdata, adk_mdcif):
     assert ("mdcif_model", "MDCIF", int) in _Structure.registered
     cmd.mdcif_modes(session, opened)
     assert len(_summaries(session, path)) == 2
+    cmd.mdcif(session)                                       # bare 'mdcif': status, the menu
+    assert session.logger.lines[-1].endswith(
+        "Windows: menu MDCIF > Porcupine, Animate, Analyze (when ChimeraX has its window).")
 
     n_added = len(session.models_added)
     copy = cmd.mdcif_animate(session, opened[0], mode=1, amplitude=-2.0, frames=12)
@@ -655,7 +670,8 @@ def test_chimerax_plot(chimerax_cmd, vdata, adk_mdcif, tmp_path):
                            save_data=str(data), save_image=str(image))
     np.testing.assert_array_equal(again, d1)                 # the first series, not added again
     lines = data.read_text().splitlines()
-    assert lines[0].startswith("# mdcif plot (ChimeraX-MDCIF 0.4.0)")
+    version = sys.modules["mdcif_chimerax"].__version__
+    assert version == "0.5.0" and lines[0] == f"# mdcif plot (ChimeraX-MDCIF {version})"
     for item in (f"# file: {path}", "# model: 1 (", "# scope: cluster", "# mode: 1",
                  "# amplitude: 3 sd", "# frames: 30", "# kind: distance (A)"):
         assert any(line.startswith(item) for line in lines if line.startswith("#")), item
@@ -923,3 +939,342 @@ def test_chimerax_plot_reuses_shown_copies(chimerax_cmd, vdata, adk_mdcif):
     assert len(session.models_added) == n_added and restored.structure is other
     cmd.reanimate(session, restored, model=1)                # the model found by file, too
     assert restored.source is model and len(session.models_added) == n_added + 1
+
+
+# --------------------------------------------------------------------------- ChimeraX: windows
+
+def test_chimerax_porcupine_geometry(chimerax_cmd, vdata, adk_mdcif):
+    """The Porcupine window draws through ``porcupine_geometry``: the command's mesh."""
+    cmd, _, UserError = chimerax_cmd
+    _, session, opened = _open_standins(cmd, vdata, adk_mdcif[0])
+    s = opened[0]
+    n_short_seen = 0
+    for mode, scale, min_length, radius in ((1, 3.0, 0.5, 0.15), (2, 2.0, 0.0, 0.3),
+                                            (1, -4.0, 1.5, 0.1)):
+        va, na, ta, n, n_short, ms, model = cmd.porcupine_geometry(session, s, mode, scale,
+                                                                   "cluster", min_length, radius)
+        surf = cmd.mdcif_porcupine(session, s, mode=mode, scale=scale, min_length=min_length,
+                                   radius=radius)
+        for mine, drawn in zip((va, na, ta), surf.geometry, strict=True):
+            np.testing.assert_array_equal(mine, drawn)
+        assert surf.SESSION_SAVE_DRAWING is True             # arrows come back from sessions
+        kept = vdata.arrows(s.atoms.coords, s.keys, ms, mode, scale, min_length)[0]
+        every = vdata.arrows(s.atoms.coords, s.keys, ms, mode, scale, 0.0)[0]
+        assert (n, n_short) == (len(kept), len(every) - len(kept))
+        assert (ms.scope, model) == ("cluster", 1)
+        assert session.logger.lines[-1].startswith(f"#{surf.id_string}: {n} arrows, cluster mode")
+        n_short_seen += n_short
+    assert n_short_seen > 0
+    glob = cmd.porcupine_geometry(session, opened[1], 1, 3.0, "global", 0.5, 0.15)
+    assert (glob[5].scope, glob[6]) == ("global", 2)
+    with pytest.raises(UserError, match="radius must be positive"):
+        cmd.porcupine_geometry(session, s, radius=0)
+    with pytest.raises(UserError, match="no arrows to draw"):
+        cmd.porcupine_geometry(session, s, min_length=1e6)
+
+    # the command the window logs for each mode
+    assert cmd.porcupine_command(s) == (f"mdcif porcupine #{s.id_string} mode 1 scale 3 color "
+                                        "#ff8c00 radius 0.15 minLength 0.5 scope cluster")
+    rgba = np.array([42, 120, 214, 255], dtype=np.uint8)
+    assert cmd.porcupine_command(s, 2, 2.5, rgba, "global", 0.25, 0.2) == (
+        f"mdcif porcupine #{s.id_string} mode 2 scale 2.5 color #2a78d6 radius 0.2 "
+        "minLength 0.25 scope global")
+
+
+def test_chimerax_retune_animation(chimerax_cmd, vdata, adk_mdcif):
+    """The Animate window changes its copy's frames in place, unless a plot measures on it."""
+    cmd, ran, UserError = chimerax_cmd
+    path = adk_mdcif[0]
+    _, session, opened = _open_standins(cmd, vdata, path)
+    model, ca = opened[0], _ca(opened[0])
+    rest, data = model.atoms.coords.copy(), model.mdcif_data
+    copy = cmd.mdcif_animate(session, model, mode=1, amplitude=3.0, frames=12)
+    n_added = len(session.models_added)
+    copy.active_coordset_id = 5                              # stopped on frame 5
+    assert cmd.retune_animation(session, copy, mode=2, amplitude=-1.5, frames=8) is copy
+    np.testing.assert_allclose(copy.coordsets, vdata.mode_frames(
+        rest, model.keys, data.mode_set(1), 2, -1.5, 8))
+    assert (copy.mdcif_mode, copy.mdcif_scope, copy.mdcif_amplitude) == (2, "cluster", -1.5)
+    assert copy.num_coordsets == 8 and copy.active_coordset_id == 5
+    assert copy.name == f"{path.name} model 1 cluster mode 2"
+    assert len(session.models_added) == n_added               # in place: no new model
+    cmd.retune_animation(session, copy, scope="global")      # None keeps the others
+    np.testing.assert_allclose(copy.coordsets, vdata.mode_frames(
+        rest, model.keys, data.mode_set(1, True), 2, -1.5, 8))
+    assert copy.name == f"{path.name} model 1 global mode 2" and copy.mdcif_amplitude == -1.5
+
+    # a retuned copy is found by its new settings, from the model and as itself
+    assert cmd.copy_for(session, model, 2, "global", -1.5, 8) == (copy, model)
+    assert cmd.copy_for(session, copy, 2, "global", -1.5, 8)[0] is copy
+    assert len(session.models_added) == n_added
+
+    # playing: as many frames, the loop goes on; other frames, it starts again at its speed
+    session._coord_set_players = [types.SimpleNamespace(structure=copy, pause_frames=3)]
+    n_ran = len(ran)
+    cmd.retune_animation(session, copy, amplitude=2.0)
+    assert len(ran) == n_ran and copy.mdcif_amplitude == 2.0
+    cmd.retune_animation(session, copy, frames=10)
+    assert ran[n_ran:] == [f"coordset stop #{copy.id_string}",
+                           f"coordset #{copy.id_string} 1,10 loop 1000 pauseFrames 3"]
+    session._coord_set_players = []
+    copy.active_coordset_id = 10
+    cmd.retune_animation(session, copy, frames=4)            # stopped past the new end
+    assert copy.active_coordset_id == 4
+
+    # bad settings change nothing
+    before = copy.coordsets.copy()
+    for kw, message in (({"frames": 2}, "frames must be at least 3"),
+                        ({"mode": 99}, "mode 99 not in")):
+        with pytest.raises(UserError, match=message):
+            cmd.retune_animation(session, copy, **kw)
+    np.testing.assert_array_equal(copy.coordsets, before)
+    assert (copy.mdcif_mode, copy.num_coordsets) == (2, 4)
+    with pytest.raises(UserError, match="not an 'mdcif animate' copy"):
+        cmd.retune_animation(session, model, mode=1)
+
+    # a plot measures on the copy: refused (None), the copy unchanged
+    cmd.mdcif_plot(session, "distance", _pick(copy, ca[9], ca[39]))
+    assert sys.modules["mdcif_chimerax.plot"].plots(session)[-1].structure is copy
+    assert cmd.retune_animation(session, copy, mode=1) is None
+    np.testing.assert_array_equal(copy.coordsets, before)
+    assert copy.mdcif_mode == 2
+
+    assert cmd.loop_command(copy) == f"coordset #{copy.id_string} 1,4 loop 1000"
+    assert cmd.loop_command(copy, 2) == f"coordset #{copy.id_string} 1,4 loop 1000 pauseFrames 2"
+    assert cmd.animate_command(model, 2, 1.5, 20, "global") == (
+        f"mdcif animate #{model.id_string} mode 2 amplitude 1.5 frames 20 scope global")
+
+
+def test_chimerax_retire_copy(chimerax_cmd, vdata, adk_mdcif):
+    """A window closes the copies it made and no plot uses; others are stopped and hidden."""
+    cmd, ran, _ = chimerax_cmd
+    plot_module = sys.modules["mdcif_chimerax.plot"]
+    _, session, opened = _open_standins(cmd, vdata, adk_mdcif[0])
+    ca = _ca(opened[0])
+    own = cmd._animate(session, opened[0], frames=6, mark=cmd.ANIMATE_MADE)
+    assert session.logger.commands[-1] == (f"mdcif animate #{opened[0].id_string} mode 1 "
+                                           "amplitude 3 frames 6 scope cluster")
+    assert getattr(own, cmd.ANIMATE_MADE) and not getattr(own, plot_module.PLOT_MADE, False)
+    user = cmd.mdcif_animate(session, opened[0], mode=2, frames=6)     # 'mdcif animate' by hand
+    cmd.retire_copy(session, own, own=True)
+    assert own.deleted
+    cmd.retire_copy(session, user, own=False)
+    assert not user.deleted and user.display is False
+    assert ran[-1] == f"coordset stop #{user.id_string}"
+    plotted = cmd._animate(session, opened[1], frames=6, mark=cmd.ANIMATE_MADE)
+    cmd.mdcif_plot(session, "distance", _pick(plotted, ca[0], ca[5]))
+    cmd.retire_copy(session, plotted, own=True)               # a plot measures on it: kept
+    assert not plotted.deleted and plotted.display is False
+    n_ran = len(ran)
+    cmd.retire_copy(session, own, own=True)                   # closed already: nothing
+    assert len(ran) == n_ran
+
+
+class _QObject:
+    """Stand-in for the Qt objects the MDCIF menu touches (names, deleteLater)."""
+
+    def __init__(self, name=""):
+        self._name, self.deleted_later = name, False
+
+    def objectName(self):
+        return self._name
+
+    def setObjectName(self, name):
+        self._name = name
+
+    def deleteLater(self):
+        self.deleted_later = True
+
+
+class _Action(_QObject):
+    def __init__(self, text, callback, tip):
+        super().__init__()
+        self.text, self.callback, self.tip = text, callback, tip
+
+
+class _Menu(_QObject):
+    def __init__(self, name):
+        super().__init__(name)
+        self._actions, self._menu_action = [], _QObject(name)
+
+    def actions(self):
+        return list(self._actions)
+
+    def addAction(self, action):
+        self._actions.append(action)
+
+    def removeAction(self, action):
+        self._actions.remove(action)
+
+    def menuAction(self):
+        return self._menu_action
+
+
+class _MenuBar:
+    def __init__(self):
+        self.kids, self.shown = [], [_QObject("Help")]      # shown: the bar's entries
+
+    def children(self):
+        return list(self.kids)
+
+    def removeAction(self, action):
+        self.shown.remove(action)
+
+
+class _MainWindow:
+    """ChimeraX's ``MainWindow.add_menu_entry`` (ui/gui.py, 1.12): a top-level menu is found by
+    object name among the menu bar's children, else made just before Help. A menu Qt has not
+    deleted yet (``deleteLater``) is still a child."""
+
+    def __init__(self):
+        self.bar = _MenuBar()
+
+    def menuBar(self):
+        return self.bar
+
+    def add_menu_entry(self, menu_names, entry_name, callback, *, tool_tip=None,
+                       insertion_point=None, shortcut=None):
+        [name] = menu_names
+        menu = next((c for c in self.bar.children() if c.objectName() == name), None)
+        if menu is None:
+            menu = _Menu(name)
+            self.bar.kids.append(menu)
+            self.bar.shown.insert(len(self.bar.shown) - 1, menu.menuAction())
+        action = _Action(entry_name, callback, tool_tip)
+        menu.addAction(action)
+        return action
+
+
+def _mdcif_menus(main_window):
+    """The MDCIF menus a user sees in the menu bar."""
+    return [m for m in main_window.bar.kids
+            if m.objectName() == "MDCIF" and m.menuAction() in main_window.bar.shown]
+
+
+def test_chimerax_menu(chimerax_cmd):
+    _, ran, _ = chimerax_cmd
+    menu = sys.modules["mdcif_chimerax.menu"]
+    labels = ["Porcupine...", "Animate...", "Analyze..."]
+
+    def gui(main_window):
+        ui = types.SimpleNamespace(is_gui=True, main_window=main_window, triggers=_Triggers())
+        return types.SimpleNamespace(ui=ui, run=lambda text: None)
+
+    nogui = types.SimpleNamespace(ui=types.SimpleNamespace(is_gui=False))
+    menu.register(nogui)                                     # no window: nothing
+    assert not menu.is_registered(nogui)
+    menu.unregister(nogui)
+
+    # installed during a session: the window exists, the entries come at once, before Help
+    window = _MainWindow()
+    session = gui(window)
+    menu.register(session)
+    [first] = _mdcif_menus(window)
+    assert [a.text for a in first.actions()] == labels and all(a.tip for a in first.actions())
+    assert [e.objectName() for e in window.bar.shown] == ["MDCIF", "Help"]
+    assert session.ui.triggers.handlers.get("ready", []) == []
+    first.actions()[0].callback(False)                       # QAction.triggered(checked)
+    assert ran[-1] == 'ui tool show "MDCIF Porcupine"'
+    first.actions()[1].callback()
+    assert ran[-1] == 'ui tool show "MDCIF Animate"'
+
+    menu.register(session)                                   # again: still one menu
+    [second] = _mdcif_menus(window)
+    assert second is not first and len(second.actions()) == 3
+    assert first.deleted_later and first.actions() == [] and first.objectName() != "MDCIF"
+
+    # 'toolshed uninstall': gone at once, not just scheduled; 'devel install' right after
+    # (the old menu not deleted yet) makes one new menu with three entries
+    old_actions = second.actions()
+    menu.unregister(session)
+    assert _mdcif_menus(window) == [] and not menu.is_registered(session)
+    assert all(m.objectName() != "MDCIF" for m in window.bar.kids)
+    assert all(a.deleted_later for a in old_actions) and second.actions() == []
+    assert [e.objectName() for e in window.bar.shown] == ["Help"]
+    menu.register(session)
+    [third] = _mdcif_menus(window)
+    assert third not in (first, second) and [a.text for a in third.actions()] == labels
+    menu.unregister(session)
+
+    # at startup the bundle is initialized before the main window: entries on 'ready'
+    session = gui(None)
+    menu.register(session)
+    assert len(session.ui.triggers.handlers["ready"]) == 1 and menu.is_registered(session)
+    session.ui.main_window = window = _MainWindow()
+    session.ui.triggers.activate_trigger("ready", None)
+    [m] = _mdcif_menus(window)
+    assert [a.text for a in m.actions()] == labels
+    menu.register(session)                                   # again after 'ready'
+    assert len(_mdcif_menus(window)) == 1 and len(_mdcif_menus(window)[0].actions()) == 3
+    assert session.ui.triggers.handlers["ready"] == []
+    menu.unregister(session)
+
+    session = gui(None)                                      # unloaded before the GUI is ready
+    menu.register(session)
+    menu.unregister(session)
+    assert session.ui.triggers.handlers["ready"] == []
+    session.ui.main_window = window = _MainWindow()
+    session.ui.triggers.activate_trigger("ready", None)
+    assert _mdcif_menus(window) == []
+
+
+def test_chimerax_uninstall(chimerax_cmd, monkeypatch):
+    """'toolshed uninstall' (ChimeraX 1.12 calls no ``finish`` then): the toolshed's "bundle
+    uninstalled" trigger removes the MDCIF menu and the "add models" handler and closes the
+    MDCIF windows without logging what they had pending."""
+    init = sys.modules["mdcif_chimerax"]
+    attach, menu = sys.modules["mdcif_chimerax.attach"], sys.modules["mdcif_chimerax.menu"]
+    toolshed = sys.modules["chimerax.core.toolshed"].get_toolshed()
+    uninstalled = toolshed.triggers.handlers.setdefault("bundle uninstalled", [])
+
+    class Tool:
+        def __init__(self, name):
+            self.tool_name, self.deleted, self.discarded = name, False, False
+
+        def discard_pending(self):
+            self.discarded = True
+
+        def delete(self):
+            self.deleted = True
+
+    tools = [Tool("MDCIF Porcupine"), Tool("MDCIF Animate"), Tool("MDCIF Analyze"), Tool("Log")]
+    window = _MainWindow()
+    session = types.SimpleNamespace(
+        ui=types.SimpleNamespace(is_gui=True, main_window=window, triggers=_Triggers()),
+        triggers=_Triggers(), run=lambda text: None,
+        tools=types.SimpleNamespace(list=lambda: list(tools)))
+    bundle = types.SimpleNamespace(name="ChimeraX-MDCIF")
+    init.bundle_api.initialize(session, bundle)
+    init.bundle_api.initialize(session, bundle)              # again (reinstall): one handler
+    assert len(uninstalled) == 1 and attach.is_registered(session)
+    assert len(_mdcif_menus(window)) == 1
+
+    toolshed.triggers.activate_trigger("bundle uninstalled", types.SimpleNamespace(name="X"))
+    assert attach.is_registered(session) and len(_mdcif_menus(window)) == 1   # not this one
+    toolshed.triggers.activate_trigger("bundle uninstalled", bundle)
+    assert not attach.is_registered(session) and not menu.is_registered(session)
+    assert _mdcif_menus(window) == [] and session.triggers.handlers["add models"] == []
+    assert [t.deleted for t in tools] == [True, True, True, False]
+    assert all(t.discarded for t in tools[:3])
+    assert uninstalled == []                                 # the handler removed itself
+
+    init.bundle_api.initialize(session, bundle)              # finish (unload) removes it too
+    init.bundle_api.finish(session, bundle)
+    assert uninstalled == [] and not attach.is_registered(session)
+
+    # uninstalled without the trigger (a restart pending): the "add models" handler stops
+    # itself once the bundle's own modules can't be imported, and only then
+    attach.register(session)
+
+    def missing(name):
+        def on_add_models(session, models):
+            raise ModuleNotFoundError(f"No module named '{name}'", name=name)
+        return on_add_models
+
+    monkeypatch.setattr(attach, "on_add_models", missing("numpy"))
+    with pytest.raises(ModuleNotFoundError):
+        session.triggers.activate_trigger("add models", [])
+    assert attach.is_registered(session)
+    monkeypatch.setattr(attach, "on_add_models", missing(f"{attach.__package__}.mdcif_data"))
+    session.triggers.activate_trigger("add models", [])
+    assert not attach.is_registered(session)

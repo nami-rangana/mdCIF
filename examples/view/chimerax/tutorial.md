@@ -4,16 +4,17 @@ An mdCIF file captures a simulation's main states as model structures, plus the 
 **modes** of each state. A mode shows how the atoms move together. This tutorial looks at such
 a file in [UCSF ChimeraX](https://www.cgl.ucsf.edu/chimerax/) with the mdcif plugin for
 ChimeraX (the ChimeraX-MDCIF bundle in [`viewers/chimerax`](../../../viewers/chimerax)). The
-plugin adds a few `mdcif` commands:
+plugin adds a few `mdcif` commands, and a menu, **MDCIF**, whose windows do the main ones with
+sliders and buttons instead of typing:
 
-| Command | What it does |
-|---|---|
-| `mdcif porcupine` | arrows showing how each Cα moves in one mode |
-| `mdcif animate` | a copy of a model that swings back and forth along one mode |
-| `mdcif morph` | a movie that morphs from one model to the next |
-| `mdcif plot` | a distance, angle or dihedral at every frame of a mode, in a window you can click |
-| `mdcif modes` | lists the models and their modes in the Log |
-| `mdcif open` | another way to open the file (the same as File → Open) |
+| Command | Or, in the MDCIF menu | What it does |
+|---|---|---|
+| `mdcif porcupine` | Porcupine… | arrows showing how each Cα moves in one mode |
+| `mdcif animate` | Animate… | a copy of a model that swings back and forth along one mode |
+| `mdcif morph` | | a movie that morphs from one model to the next |
+| `mdcif plot` | Analyze… | a distance, angle or dihedral at every frame of a mode, in a window you can click |
+| `mdcif modes` | | lists the models and their modes in the Log |
+| `mdcif open` | | another way to open the file (the same as File → Open) |
 
 We use the GB1 example, `examples/create/1_basic/gb1_meld_300K.cif`, made by
 [`1_basic.ipynb`](../../create/1_basic/1_basic.ipynb): a 300 K MELD simulation of the protein G
@@ -26,6 +27,11 @@ here was made by ChimeraX 1.12 with these same commands. The notebook
 [`view_mdcif.ipynb`](view_mdcif.ipynb) runs the same steps for you, if you would rather not type
 them.
 
+**Commands or windows.** Sections 4, 5 and 7 show each step twice: first as commands, then with
+the window from the MDCIF menu that does the same (sections 4.3, 5.2 and 7.2). Use whichever
+you like, or both. Whatever you do in a window, it writes the matching command to the Log, so
+the windows are also a good way to learn the commands.
+
 **You'll need:** ChimeraX 1.7 or newer (we used 1.12), a copy of this repository (for the
 plugin), and the example file above.
 
@@ -35,7 +41,7 @@ plugin), and the example file above.
 [6. Morph](#6-morph-between-the-models) ·
 [7. Plot a distance, angle or dihedral](#7-plot-a-distance-angle-or-dihedral-along-a-mode) ·
 [8. More with ChimeraX](#8-more-with-chimerax-pick-residues-change-the-look) ·
-[9. Sessions](#9-sessions) · [10. Cheat sheet](#10-command-cheat-sheet)
+[9. Sessions](#9-sessions) · [10. Cheat sheet](#10-cheat-sheet-commands-and-windows)
 
 ## 1. Install ChimeraX
 
@@ -65,7 +71,7 @@ devel install /path/to/mdcif/viewers/chimerax
 an old copy it finds there. The Log ends with
 
 ```
-Installed ChimeraX-MDCIF (0.4.0)
+Installed ChimeraX-MDCIF (0.5.0)
 ```
 
 and the plugin stays installed when you restart ChimeraX. On Windows the commands are the same,
@@ -73,11 +79,23 @@ with forward slashes: `devel install C:/Users/you/code/mdcif/viewers/chimerax` (
 yet). To check the plugin, type `mdcif`:
 
 ```
-ChimeraX-MDCIF 0.4.0. Subcommands: mdcif open | modes | morph | animate | porcupine | plot. Attaching mdcif data to opened .cif files: on.
+ChimeraX-MDCIF 0.5.0. Subcommands: mdcif open | modes | morph | animate | porcupine | plot. Attaching mdcif data to opened .cif files: on. Windows: menu MDCIF > Porcupine, Animate, Analyze.
 ```
 
-The last part matters: the plugin attaches mdcif data to every `.cif` file you open, so you open
-an mdCIF file the normal way and the `mdcif` commands just work.
+"Attaching mdcif data to opened .cif files: on" matters: the plugin attaches mdcif data to every
+`.cif` file you open, so you open an mdCIF file the normal way and the `mdcif` commands just
+work.
+
+The plugin also adds the menu **MDCIF** to ChimeraX's menu bar, just before Help. Its three
+entries open the windows of sections 4.3, 5.2 and 7. Hold the pointer over an entry to see what
+it does:
+
+![The MDCIF menu, open, with the pointer on Porcupine...](figures/mdcif_menu.png)
+
+The same windows are also in **Tools → Structure Analysis** (MDCIF Porcupine, MDCIF Animate and
+MDCIF Analyze). A window opened before any mdCIF file says so ("Open an mdcif file (File >
+Open) …"), with its buttons greyed out, and fills in as soon as you open one. The windows float
+on top of ChimeraX's main window: drag one aside by its title bar if it covers the protein.
 
 **To update** the plugin after its code has changed, remove it first and install it again, in
 the same ChimeraX:
@@ -88,10 +106,11 @@ devel clean /path/to/mdcif/viewers/chimerax
 devel install /path/to/mdcif/viewers/chimerax
 ```
 
-The new version works at once. Don't just run `devel install` again: the plugin is in use from
-the moment ChimeraX starts (it watches for mdCIF files being opened), so ChimeraX asks to
-restart, and after the restart it keeps the old code if the version number hasn't changed. If
-an install ends with "custom initialization failed", restart ChimeraX.
+The new version works at once. `toolshed uninstall` takes the MDCIF menu away and closes its
+windows, and `devel install` brings back a new menu. Don't just run `devel install` again: the
+plugin is in use from the moment ChimeraX starts (it watches for mdCIF files being opened), so
+ChimeraX asks to restart, and after the restart it keeps the old code if the version number
+hasn't changed. If an install ends with "custom initialization failed", restart ChimeraX.
 
 ## 3. Open the file
 
@@ -219,6 +238,83 @@ mdcif porcupine #1.2 mode 1 scope global color #6a3d9a
 
 ![Porcupine plot of global mode 1 on model 2, purple arrows](figures/porcupine_2_global_1.png)
 
+### 4.3. With the window: MDCIF → Porcupine…
+
+The **MDCIF Porcupine** window draws the same arrows with sliders, and can show several modes
+at once. Put model 1 back on screen, in light grey this time so that the blue arrows of mode 2
+stand out:
+
+```
+close #1.2.1; hide #1.2 models; show #1.1 models
+color #1.1 #c8c8c8
+```
+
+Then choose **MDCIF → Porcupine…** in the menu bar. The window opens on model 1 (#1.1) with
+mode 1 ticked, and draws its arrows at once: the same arrows as `mdcif porcupine #1.1 mode 1`,
+as model #1.1.1. The Log shows what happened, as commands:
+
+```
+> ui tool show "MDCIF Porcupine"
+> mdcif porcupine #1.1 mode 1 scale 3 color #ff8c00 radius 0.15 minLength 0.5 scope cluster
+```
+
+Now tick modes **2** and **3** too. Each mode gets its own arrows, in the colour of the button
+at the end of its row:
+
+![The MDCIF Porcupine window with modes 1-3 ticked, and their arrows on model 1](figures/window_porcupine.png)
+
+**Figure 2.** Modes 1, 2 and 3 of model 1 at once: orange, blue and green arrows, each set its
+own model (#1.1.1, #1.1.2 and #1.1.3). Each row gives the mode's share of the motion and its
+size (one standard deviation, sd). The line at the bottom says how many arrows each mode has.
+
+Each control of the window is an option of `mdcif porcupine` (section 4.2):
+
+| In the window | Option of `mdcif porcupine` |
+|---|---|
+| **Structure** | the model to draw on (#1.1, #1.2, or a playing copy from section 5) |
+| **Scope**: cluster or global | `scope` ("global" is greyed out for a file without global modes) |
+| **Modes**: the tick boxes | `mode`: each ticked mode gets its own arrows |
+| the colour button of a mode | `color`: click it for ChimeraX's colour chooser |
+| **Length** (0.5 to 10 sd) | `scale` |
+| **Thickness** (0.05 to 0.6 Å) | `radius` |
+| **Min length** (0 to 3 Å) | `minLength` |
+
+To draw what section 4.2 drew with a command, mode 2 alone with green arrows at 2σ:
+
+1. Untick modes **1** and **3**.
+2. Type `2` in the box beside **Length** and press Enter (or drag the slider to 2.0).
+3. Click the colour button of mode 2. In the colour chooser, pick a green, or type `#228b22`
+   in its **HTML** box and press Return.
+
+The arrows change as you go, and they stay the same model (#1.1.2), so nothing piles up. The
+line at the bottom then reads `#1.1.2 mode 2: 34 arrows (22 shorter than 0.5 Å not drawn)`: the
+34 arrows of section 4.2. Once you stop changing things (let go of the slider, press Enter),
+the Log gets one command per ticked mode, not one for every step of the slider. Here the last
+one is
+
+```
+> mdcif porcupine #1.1 mode 2 scale 2 color #228b22 radius 0.15 minLength 0.5 scope cluster
+```
+
+What else the window does:
+
+- **Live** is on at the start: the arrows follow the sliders while you drag. With Live off,
+  nothing changes until you click **Draw**.
+- **Keep** leaves the arrows you see in the scene; the next change draws new ones next to them
+  (#1.1.4, …), for example to compare two thicknesses. **Clear** removes the window's arrows
+  that were not kept.
+- A mode with no arrow left at your settings (try Min length 3 with Length 0.5) is named in red
+  at the bottom, for example `mode 2: no arrows to draw for cluster mode 2 at 0.5 sd with
+  minLength 3 A`.
+- **Animate this mode** opens the Animate window of section 5.2 on the same model and mode.
+- Closing the window (the × in its corner) leaves its arrows in the scene.
+
+Before the next section, click **Clear**, close the window, and colour model 1 blue again:
+
+```
+color #1.1 #2a78d6
+```
+
 ## 5. Bring the modes to life
 
 Each mode gives every Cα a direction and a typical displacement, measured in Å. `mdcif animate`
@@ -236,6 +332,8 @@ follow their residue's Cα.
 These modes follow straight paths, so large motions can stretch bonds or loops. That's a
 limitation of the approximation, not of the file: real protein motions follow more complex
 paths.
+
+### 5.1. With commands
 
 Mode 1 of the folded model 1:
 
@@ -276,10 +374,86 @@ mdcif animate #1.2 mode 1
 seen in only 5% of the frames, and its modes are smaller (σ = 2.8 Å for mode 1, against 6.1 Å
 in model 1).
 
-**Recording a movie yourself.** Start recording, start the motion, let it play for as many
-frames as you want (60 = two cycles), then write the file:
+### 5.2. With the window: MDCIF → Animate…
+
+The **MDCIF Animate** window plays a mode with sliders, and changes it while it plays. Stop the
+copy of model 2 and put model 1 back:
 
 ```
+coordset stop #2; close #2; hide #1.2 models; show #1.1 models
+```
+
+Choose **MDCIF → Animate…**. The window opens on model 1 (#1.1), mode 1, and nothing moves
+yet: the line at the bottom says `Play (or a change) animates a copy of #1.1, as 'mdcif
+animate' does.` Click **Play**. The window makes a playing copy (#2), exactly as `mdcif animate`
+does, and the Log shows that command:
+
+```
+> mdcif animate #1.1 mode 1 amplitude 3 frames 30 scope cluster
+#2: cluster mode 1 of model 1, 26% variance, +/-3 sd ('coordset stop #2' to stop)
+```
+
+![The MDCIF Animate window while #2 plays](figures/window_animate.png)
+
+**Figure 3.** The MDCIF Animate window while copy #2 plays. The line at the bottom says what
+plays, and the **Frame** slider follows the motion.
+
+The controls are the options of `mdcif animate` (section 5.1), plus a speed:
+
+| In the window | Option of `mdcif animate` |
+|---|---|
+| **Structure** | the model to play |
+| **Scope**: cluster or global, and **Mode** | `scope`, `mode` (the mode's share of the motion is shown next to it) |
+| **Amplitude** (−10 to 10 sd) | `amplitude` (a negative number swings the other way first) |
+| **Frames** (type a number, press Enter) | `frames` |
+| **Speed** (1/1 = full speed, down to 1/10) | none: ChimeraX's `coordset … pauseFrames`, each frame shown 2, 3, … times |
+
+Try these, in order:
+
+1. Type `2` in the box beside **Speed** and press Enter: the copy now plays at half speed, and
+   the Log shows the command for that, `coordset #2 1,30 loop 1000 pauseFrames 2`.
+2. Drag the **Frame** slider to 8. The motion stops on that frame, the +3σ turning point, and
+   the line at the bottom ends `(stopped at frame 8)`.
+3. Click **Play** to start again. Play always starts at frame 1; **Stop** stops the motion.
+4. Click **Save movie…** to record one back-and-forth cycle as a movie (section 5.3).
+5. Click **Arrows for this mode**. The Porcupine window of section 4.3 opens on the copy with
+   this mode ticked, and draws its arrows (#2.1). Click **Clear** there and close that window.
+6. Click **Plot geometry…**. The Analyze window of section 7 opens for this copy, ready for the
+   atoms to measure. Close it for now.
+7. Choose **2** in the **Mode** list. The copy changes in place, and #2 stays #2. Once you stop
+   changing things, the Log says what the copy now plays, and which command makes a copy like it:
+
+   ```
+   #2 now plays cluster mode 2 of model 1, 20% variance, +/-3 sd, 30 frames (changed in place; a new copy like it: mdcif animate #1.1 mode 2 amplitude 3 frames 30 scope cluster)
+   ```
+
+   Amplitude, Frames and Scope change the copy in place the same way. Choosing another
+   Structure makes a new copy and closes the old one.
+
+Close the Animate window with the × in its corner: the copy keeps playing.
+
+### 5.3. Record a movie
+
+In the Animate window, **Save movie…** asks for a file name. The suggested name says what
+plays, for example `gb1_meld_300K_model1_cluster_mode1.mp4` in ChimeraX's current folder, and
+you can choose MP4, WebM, QuickTime (`.mov`) or AVI. It records one cycle at the speed you set:
+the 30 frames at half speed give a movie of 60 frames (2.4 s at 25 frames per second). The window
+is greyed out while it records. Then the line at the bottom says `Movie saved to …`, and the
+motion plays on. The Log shows the commands it ran:
+
+```
+> movie record
+> coordset #2 1,30 pauseFrames 2
+> wait 60
+> movie encode /path/to/gb1_meld_300K_model1_cluster_mode1.mp4 framerate 25 quality good wait true
+```
+
+With commands, close the window's copy first (or `mdcif animate` makes a second one). Then start
+recording, start the motion, let it play for as many frames as you want (60 = two cycles at
+full speed), and write the file:
+
+```
+close #2
 movie record
 mdcif animate #1.1 mode 1
 wait 60
@@ -319,7 +493,12 @@ also shows a slider to step through the frames (bottom right):
 
 A movie shows a mode, and a plot puts numbers on it. `mdcif plot` plays a mode, the same way
 `mdcif animate` does, and measures a distance, an angle or a dihedral at every frame. The result
-opens in a window with one point per frame. Clicking a point stops the motion at that frame.
+opens in the **MDCIF Analyze** window, on its **Geometry** tab, with one point per frame.
+Clicking a point stops the motion at that frame.
+
+This section starts with the command, because it opens the window already filled in. Without
+typing, the same window comes from **MDCIF → Analyze…**, or from **Plot geometry…** in the
+Animate window (section 5.2); you then type or pick the atoms in it (sections 7.2 and 7.6).
 
 ### 7.1. A distance
 
@@ -356,13 +535,14 @@ second, then click **Add** (or press Return). Either way the Log shows
 #2 distance /A:12@CA - /A:38@CA along cluster mode 1 of model 1, +/-3 sd, 30 frames: min 10.77, max 16.54, mean 12.93 A
 ```
 
-### 7.2. The plot window
+### 7.2. The MDCIF Analyze window
 
-![The MDCIF Plot window with two distances, stopped at frame 8](figures/plot_window.png)
+![The MDCIF Analyze window with two distances, stopped at frame 8](figures/plot_window.png)
 
-**Figure 2.** The MDCIF Plot window with the two distances, stopped at frame 8 by a click on the
-plot. Across the bottom are the frame numbers, and up the side the distance. The second row
-holds the atoms typed for the second distance (`12CA`, `38CA`).
+**Figure 4.** The MDCIF Analyze window with the two distances, stopped at frame 8 by a click on
+the plot. Its title says what it plots, `MDCIF Analyze: distance on #2`. The plot is on the
+**Geometry** tab, the only tab so far. Across the bottom are the frame numbers, and up the side
+the distance. The second row holds the atoms typed for the second distance (`12CA`, `38CA`).
 
 - **Type atoms** in the second row. Choose what to measure under **Measure** (Distance, Angle
   or Dihedral). The window then shows 2, 3 or 4 **Atoms** boxes. Type a residue number and an
@@ -371,8 +551,7 @@ holds the atoms typed for the second distance (`12CA`, `38CA`).
   copy the window shows. The boxes keep what you typed, so for a neighbouring residue you only
   change a number. If an atom isn't there, a red message under the list says why and nothing
   is added, for example `atom 1, on #2: no atom /A:38@CB (residue 38 has N, CA, C, O)`
-  (Gly 38 has no side chain). The message lists the atoms the residue does have. Atoms that
-  are already plotted are not added twice, and a grey note says so.
+  (Gly 38 has no side chain). The message lists the atoms the residue does have.
 - While the copy plays, the large dots and the thin vertical line move to the frame on screen.
   The line at the bottom gives the values there, for example `frame 8 / 30: 13.99, 16.54 Å`.
   The motion plays as fast with the window open as without it.
@@ -399,7 +578,7 @@ distance style color black decimalPlaces 1; label height 1.5
 
 ![The copy at frame 8 with the two distances drawn](figures/plot_structure.png)
 
-At frame 8 the labels read 14.0 and 16.5 Å, the same values the plot window gives. We checked
+At frame 8 the labels read 14.0 and 16.5 Å, the same values the Analyze window gives. We checked
 all 30 frames of the plot against ChimeraX's `distance`, `angle` and `torsion` commands, and
 they agree.
 
@@ -420,15 +599,14 @@ mdcif plot dihedral #2/A:10@N #2/A:10@CA #2/A:10@C #2/A:11@N
 #2 dihedral /A:10@N - /A:10@CA - /A:10@C - /A:11@N along cluster mode 1 of model 1, +/-3 sd, 30 frames: min 28.1, max 147.0, mean 94.3 deg
 ```
 
-![The MDCIF Plot window with the distances, the angle and the dihedral, stopped at frame 8](figures/plot_stacked.png)
+![The MDCIF Analyze window with the distances, the angle and the dihedral, stopped at frame 8](figures/plot_stacked.png)
 
-**Figure 3.** The same window after the two commands, stopped at frame 8: the distances at the
-top, the angle in the middle, the dihedral at the bottom. The window is now called `MDCIF Plot:
-distance, angle, dihedral on #2`. The list names the kind of each line, and the line at the
+**Figure 5.** The same window after the two commands, stopped at frame 8: the distances at the
+top, the angle in the middle, the dihedral at the bottom. The window is now called `MDCIF
+Analyze: distance, angle, dihedral on #2`. The list names the kind of each line, and the line at the
 bottom gives the values at the shown frame, kind by kind: `frame 8 / 30: 13.99, 16.54 Å ·
 119.3° · 28.1°`. A click or drag on any panel stops the motion at that frame. The large dots
-and the vertical line then move in every panel. The motion still plays as fast as without the
-window, also with three panels.
+and the vertical line then move in every panel.
 
 In the window, you can do the same by choosing **Angle** under **Measure** and typing `10CA`,
 `11CA` and `12CA` in the three boxes, or **Dihedral** and `10N`, `10CA`, `10C` and `11N` in four.
@@ -492,7 +670,7 @@ in the order the lines were added. Two atoms in a name mean a distance, three an
 a dihedral. In Python, `pandas.read_csv("gb1_mode1.csv", comment="#")` reads it.
 
 ```
-# mdcif plot (ChimeraX-MDCIF 0.4.0)
+# mdcif plot (ChimeraX-MDCIF 0.5.0)
 # file: /path/to/mdcif/examples/create/1_basic/gb1_meld_300K.cif
 # model: 1 (Cluster 1 medoid (frame 142700, t = 285.402 ns))
 # scope: cluster
@@ -518,7 +696,7 @@ cartoon hide #2; show #2@CA atoms
 ```
 
 Then pick the atoms in order. **Ctrl-click** the Cα of Asp 40, then **Ctrl-Shift-click** the Cα
-of Leu 12. In the plot window, with **Distance** chosen under **Measure**, click **Add selected
+of Leu 12. In the Analyze window, with **Distance** chosen under **Measure**, click **Add selected
 atoms**: the line `/A:40@CA - /A:12@CA` is added to the distance panel. The window uses the
 order in which you picked the atoms. Typing `mdcif plot distance sel` does the same, with the
 atoms in picking order.
@@ -531,13 +709,15 @@ gives the commands above:
 a distance needs 2 selected atoms, 12 are selected (used in picking order) - a click on the cartoon selects whole residues: show the atoms first (cartoon hide #2; show #2@CA atoms)
 ```
 
-When no plot window is open, **Tools → Structure Analysis → MDCIF Plot** opens an empty one
-(with a plot window open, it brings that window to the front instead). The empty window says
-what to do, with your model's number:
+**Start from an empty window.** When no Analyze window is open, **MDCIF → Analyze…** (also
+Tools → Structure Analysis → MDCIF Analyze) opens an empty one. When Analyze windows are open,
+it brings them to the front instead, an empty one on top, else the newest. **Plot geometry…** in
+the Animate window (section 5.2) also opens an empty one, for the copy it plays. The empty
+window says what to do, with the number of the model on screen, here the copy #2:
 
 ```
 Type 2 atoms (e.g. 10CA 40CA) and click Add, or
-show the atoms (cartoon hide #1.1; show #1.1@CA atoms),
+show the atoms (cartoon hide #2; show #2@CA atoms),
 select 2 in order (Ctrl-click, then Ctrl-Shift-click)
 and click Add selected atoms
 ```
@@ -554,7 +734,7 @@ use that copy.
 select clear; cartoon #2; hide #2 atoms; ~distance
 ```
 
-Close the plot windows with the × in their corner. Closing a window leaves its copy playing, and
+Close the Analyze windows with the × in their corner. Closing a window leaves its copy playing, and
 a later `mdcif plot` on model 1 uses that copy again instead of making a second one. If you
 close the copy first, the window stays: it says the motion was closed, and Save plot and Save
 data still work.
@@ -651,35 +831,43 @@ opened ChimeraX session
 (The arrows are #1.1.2 this time because the surface from 8.4 is #1.1.1.) If the `.cif` file
 has moved, the `mdcif` commands say "its file … is gone": open the `.cif` file again.
 
-**Plot windows are not saved in a session.** An animated copy is saved, and it remembers its
-mode. After you open the session again, type the plot command again, for example
+Porcupine arrows come back as they were, in their colours, whether you drew them with
+`mdcif porcupine` or with the Porcupine window.
+
+**The MDCIF windows (Porcupine, Animate and Analyze, with its plots) are not saved in a
+session.** `close session` closes them, and opening the session brings none back: open them
+again from the MDCIF menu. An animated copy is saved, and it remembers its mode. After you open
+the session again, type the plot command again, for example
 `mdcif plot distance #2/A:10@CA #2/A:40@CA` with the copy's atoms, or the same atoms on the
-model (`#1.1/…`). Either way it uses the restored copy's frames and makes no new copy.
+model (`#1.1/…`). Either way it uses the restored copy's frames and makes no new copy. (The
+Animate window doesn't take over a restored copy: its Play makes a new one.)
 
-## 10. Command cheat sheet
+## 10. Cheat sheet: commands and windows
 
-| To… | type |
-|---|---|
-| open an mdCIF file | `open file.cif` (or File → Open…, or drag and drop); `mdcif open file.cif` |
-| list the models and their modes | `mdcif modes` |
-| draw the arrows of mode 2 of model 1 | `mdcif porcupine #1.1 mode 2` (options `scale`, `color`, `scope global`, `minLength`, `radius`) |
-| remove those arrows | `close #1.1.1` (the Log gives the number) |
-| play mode 1 of model 2 | `mdcif animate #1.2 mode 1` (options `amplitude`, `frames`, `scope global`) |
-| stop it, or hold one frame | `coordset stop #2`, then `coordset #2 8` |
-| morph through the models | `mdcif morph #1` (options `frames`, `wrap false`); again: `coordset #2` |
-| plot a distance along mode 1 of model 1 | `mdcif plot distance #1.1/A:10@CA #1.1/A:40@CA` (options `mode`, `scope global`, `amplitude`, `frames`, `new true`) |
-| plot an angle or a dihedral | `mdcif plot angle` with 3 atoms, `mdcif plot dihedral` with 4, in order (a panel under the distances; `new true` for a plot of its own); `sel` = the atoms you picked, in picking order |
-| type the atoms in the plot window | choose Measure, type `10CA` `40CA` in the Atoms boxes, click Add (or press Return) |
-| stop the motion at one frame of the plot | click that point in any panel of the plot window |
-| save a plot and its numbers | `mdcif plot … saveImage plot.png saveData plot.csv`, or Save plot… / Save data… in the window (every panel) |
-| open an empty plot window | Tools → Structure Analysis → MDCIF Plot |
-| every option of a command | `usage mdcif porcupine` |
-| install or update the plugin | `toolshed uninstall ChimeraX-MDCIF` (if installed), `devel clean PATH`, `devel install PATH` |
-| colour a model (or only its cartoon) | `color #1.1 cornflowerblue` (`… target c`) |
-| show some residues as sticks | `show #1.1:9-13 atoms; style #1.1:9-13 stick` |
-| save a picture | `save picture.png width 1200 supersample 3` |
-| record a movie | `movie record`, then `mdcif animate …; wait 60`, then `movie encode movie.mp4` |
-| save everything | `save mywork.cxs` |
+| To… | type | or, in the MDCIF menu |
+|---|---|---|
+| open an mdCIF file | `open file.cif` (or File → Open…, or drag and drop); `mdcif open file.cif` | |
+| list the models and their modes | `mdcif modes` | (each window lists the modes of its model) |
+| draw the arrows of mode 2 of model 1 | `mdcif porcupine #1.1 mode 2` (options `scale`, `color`, `scope global`, `minLength`, `radius`) | Porcupine…: Structure #1.1, tick 2; sliders Length, Thickness, Min length |
+| draw several modes at once | one `mdcif porcupine` per mode | Porcupine…: tick them all |
+| remove those arrows | `close #1.1.1` (the Log gives the number) | Porcupine…: Clear |
+| play mode 1 of model 2 | `mdcif animate #1.2 mode 1` (options `amplitude`, `frames`, `scope global`) | Animate…: Structure #1.2, Mode 1, Play |
+| change what plays | a new `mdcif animate` (a new copy) | Animate…: Mode, Amplitude, Frames (the same copy, changed in place) |
+| stop it, or hold one frame | `coordset stop #2`, then `coordset #2 8` | Animate…: Stop; drag the Frame slider |
+| play it slower | `coordset #2 1,30 loop 1000 pauseFrames 2` | Animate…: Speed |
+| morph through the models | `mdcif morph #1` (options `frames`, `wrap false`); again: `coordset #2` | |
+| plot a distance along mode 1 of model 1 | `mdcif plot distance #1.1/A:10@CA #1.1/A:40@CA` (options `mode`, `scope global`, `amplitude`, `frames`, `new true`) | Analyze… (or Plot geometry… in Animate): type `10CA` `40CA`, click Add |
+| plot an angle or a dihedral | `mdcif plot angle` with 3 atoms, `mdcif plot dihedral` with 4, in order (a panel under the distances; `new true` for a plot of its own); `sel` = the atoms you picked, in picking order | Analyze…: choose Measure, type 3 or 4 atoms, Add (or Add selected atoms) |
+| stop the motion at one frame of the plot | | click that point in any panel of the Analyze window |
+| save a plot and its numbers | `mdcif plot … saveImage plot.png saveData plot.csv` | Analyze…: Save plot… / Save data… (every panel) |
+| open an empty Analyze window | | Analyze… (or Tools → Structure Analysis → MDCIF Analyze) |
+| every option of a command | `usage mdcif porcupine` | |
+| install or update the plugin | `toolshed uninstall ChimeraX-MDCIF` (if installed), `devel clean PATH`, `devel install PATH` | |
+| colour a model (or only its cartoon) | `color #1.1 cornflowerblue` (`… target c`) | |
+| show some residues as sticks | `show #1.1:9-13 atoms; style #1.1:9-13 stick` | |
+| save a picture | `save picture.png width 1200 supersample 3` | |
+| record a movie | `movie record`, then `mdcif animate …; wait 60`, then `movie encode movie.mp4` | Animate…: Save movie… (one cycle) |
+| save everything | `save mywork.cxs` (the MDCIF windows are not saved) | |
 
 **See more.** The ChimeraX User Guide explains every command, with all its options:
 

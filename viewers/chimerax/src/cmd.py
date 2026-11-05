@@ -23,7 +23,14 @@ time a command needs it). An animated copy keeps its model's mode data, so ``mdc
 porcupine`` works on it too; both commands start from the deposited coordinates (the
 copy's first coordinate set). ``mdcif plot`` measures on an animate copy (made for it from
 a model, or the one given); one plot per copy holds every kind, a panel each (``new true``
-starts another). Plots and the MDCIF Plot window are in ``plot.py`` / ``tool.py``.
+starts another). Plots are in ``plot.py``, the Analyze window and its Geometry tab in
+``analyze_tool.py`` / ``geometry_tab.py``.
+
+The windows of the MDCIF menu (``menu.py``) work through the helpers here, which have no Qt:
+``porcupine_geometry`` (the arrow mesh of 'mdcif porcupine') and ``porcupine_command`` (the
+command to log), ``retune_animation`` (new frames for an animate copy, in place),
+``retire_copy`` (close or put away a copy no window shows any more) and ``loop_command`` (the
+'coordset' loop that plays a copy).
 """
 
 import os
@@ -55,6 +62,8 @@ ScopeArg = EnumOf(["cluster", "global"])
 KindArg = EnumOf(list(MEASURES))
 MIN_ANIMATE_FRAMES = 3                  # sin() is 0 at every frame of a 1- or 2-frame cycle
 ANIMATE_DEFAULTS = (1, "cluster", 3.0, 30)      # mode, scope, amplitude, frames
+PORCUPINE_COLOR = (255, 140, 0, 255)            # 'mdcif porcupine' arrows without 'color'
+ANIMATE_MADE = "_mdcif_animate_made"    # attribute of copies the Animate window made (not saved)
 
 
 def _structures(models):
@@ -133,9 +142,11 @@ def _set_frames(structure, xyz):
 
 def mdcif(session):
     auto = "on" if attach.is_registered(session) else "off (restart ChimeraX after installing)"
+    where = "" if session.ui.is_gui else " (when ChimeraX has its window)"
     session.logger.info(
         f"ChimeraX-MDCIF {__version__}. Subcommands: mdcif open | modes | morph | animate | "
-        f"porcupine | plot. Attaching mdcif data to opened .cif files: {auto}.")
+        f"porcupine | plot. Attaching mdcif data to opened .cif files: {auto}. Windows: menu "
+        f"MDCIF > Porcupine, Animate, Analyze{where}.")
 
 
 mdcif_desc = CmdDesc(synopsis="Report mdcif bundle status")
@@ -215,8 +226,7 @@ def mdcif_animate(session, structure, mode=1, amplitude=3.0, frames=30, scope="c
         xyz = mode_frames(_rest_coords(structure), _keys(structure), ms, mode, amplitude, frames)
     except ValueError as exc:
         raise UserError(str(exc)) from None
-    base = os.path.basename(data.path)
-    copy = structure.copy(f"{base} model {model} {scope} mode {mode}")
+    copy = structure.copy(_copy_name(data, model, scope, mode))
     _set_frames(copy, xyz)
     copy.position = structure.scene_position        # the copy is top level, the source may not be
     copy.mdcif_data, copy.mdcif_model, copy.mdcif_copy = data, model, True
@@ -240,30 +250,140 @@ mdcif_animate_desc = CmdDesc(
 )
 
 
-def mdcif_porcupine(session, structure, mode=1, scale=3.0, color=None, scope="cluster",
-                    min_length=0.5, radius=0.15):
-    from chimerax.core.models import Surface
+def _copy_name(data, model, scope, mode):
+    return f"{os.path.basename(data.path)} model {model} {scope} mode {mode}"
 
+
+def animate_command(structure, mode, amplitude, frames, scope):
+    """The 'mdcif animate' command for these settings, as text (for the Log)."""
+    return (f"mdcif animate #{structure.id_string} mode {mode} amplitude {amplitude:g} "
+            f"frames {frames} scope {scope}")
+
+
+def loop_command(structure, pause_frames=1):
+    """The 'coordset' command that plays an animate copy in a loop from frame 1, showing each
+    frame for ``pause_frames`` graphics frames (1/N of full speed)."""
+    pause = f" pauseFrames {pause_frames}" if pause_frames > 1 else ""
+    return f"coordset #{structure.id_string} 1,{structure.num_coordsets} loop 1000{pause}"
+
+
+def player(session, structure):
+    """The 'coordset' player moving ``structure``, or None. ChimeraX 1.12 keeps the running
+    ones in ``session._coord_set_players`` (std_commands/coordset.py); a stopped one leaves."""
+    return next((p for p in getattr(session, "_coord_set_players", ())
+                 if p.structure is structure), None)
+
+
+def retune_animation(session, copy, mode=None, scope=None, amplitude=None, frames=None):
+    """Give an animate copy the frames of other settings, in place (same model id); None keeps
+    a setting. What the Animate window does when a setting changes.
+
+    The frames start again from the copy's first coordinate set (the deposited model); the
+    copy's ``mdcif_mode`` / ``mdcif_scope`` / ``mdcif_amplitude`` and its name follow. A playing
+    copy keeps playing: with as many frames as before its loop just shows the new ones,
+    otherwise the loop starts again at frame 1 at the same speed. A stopped copy stays on its
+    frame. Returns the copy, or None (and changes nothing) when a plot measures on it, whose
+    values would no longer match the frames: the caller makes a new copy then.
+    """
+    if not _alive(copy) or not getattr(copy, "mdcif_copy", False):
+        raise UserError("not an 'mdcif animate' copy")
+    if any(p.alive and p.structure is copy for p in plots(session)):
+        return None
+    wanted = [getattr(copy, name, None) if v is None else v for v, name in zip(
+        (mode, scope, amplitude), ("mdcif_mode", "mdcif_scope", "mdcif_amplitude"), strict=True)]
+    mode, scope, amplitude = (d if v is None else v for v, d in zip(
+        wanted, ANIMATE_DEFAULTS[:3], strict=True))     # copies from before 0.3.0: defaults
+    old_frames = copy.num_coordsets
+    frames = old_frames if frames is None else int(frames)
+    if frames < MIN_ANIMATE_FRAMES:
+        raise UserError(f"frames must be at least {MIN_ANIMATE_FRAMES}")
+    ms, model = _mode_set(session, copy, scope)
+    try:
+        xyz = mode_frames(_rest_coords(copy), _keys(copy), ms, mode, amplitude, frames)
+    except ValueError as exc:
+        raise UserError(str(exc)) from None
+    playing = player(session, copy)
+    shown = getattr(copy, "active_coordset_id", 1)
+    restart = playing is not None and frames != old_frames
+    if restart:
+        pause = playing.pause_frames
+        run(session, f"coordset stop #{copy.id_string}", log=False)
+    _set_frames(copy, xyz)
+    copy.mdcif_mode, copy.mdcif_scope, copy.mdcif_amplitude = mode, scope, float(amplitude)
+    copy.name = _copy_name(copy.mdcif_data, model, scope, mode)
+    if restart:
+        run(session, loop_command(copy, pause), log=False)
+    elif playing is None:                           # stay on the frame shown
+        copy.active_coordset_id = min(max(shown, 1), frames)
+    return copy
+
+
+def retire_copy(session, copy, own):
+    """Put away an animate copy that a plot or the Animate window has moved off: closed if
+    ``own`` (they made it) and no plot measures on it, else stopped and hidden."""
+    if not _alive(copy):
+        return
+    if own and not any(p.structure is copy for p in plots(session)):
+        session.models.close([copy])
+    else:
+        run(session, f"coordset stop #{copy.id_string}", log=False)
+        copy.display = False
+
+
+def porcupine_geometry(session, structure, mode=1, scale=3.0, scope="cluster", min_length=0.5,
+                       radius=0.15):
+    """The arrows 'mdcif porcupine' draws, as a mesh, without drawing them:
+    ``(va, na, ta, n_arrows, n_short, ms, model)`` = vertices, normals and triangles, the
+    number of arrows and of those left out as shorter than ``min_length``, the mode set and the
+    model number. UserError for what the command refuses (no arrows left, a bad radius, ...)."""
     if radius <= 0:
         raise UserError("radius must be positive")
     if min_length < 0:
         raise UserError("minLength must not be negative")
     ms, model = _mode_set(session, structure, scope)
+    coords, keys = _rest_coords(structure), _keys(structure)
     try:
-        starts, ends = arrows(_rest_coords(structure), _keys(structure), ms, mode, scale,
-                              min_length)
+        starts, ends = arrows(coords, keys, ms, mode, scale, min_length)
+        n_all = len(arrows(coords, keys, ms, mode, scale, 0.0)[0])
     except ValueError as exc:
         raise UserError(str(exc)) from None
     va, na, ta = arrow_mesh(starts, ends, radius=radius, head_radius=2.7 * radius)
     if len(ta) == 0:
         raise UserError(f"no arrows to draw for {ms.scope} mode {mode} at {scale:g} sd "
                         f"with minLength {min_length:g} A")
+    return va, na, ta, len(starts), n_all - len(starts), ms, model
+
+
+def porcupine_command(structure, mode=1, scale=3.0, color=None, scope="cluster", min_length=0.5,
+                      radius=0.15):
+    """The 'mdcif porcupine' command for these settings, as text (for the Log); ``color``: RGB
+    or RGBA, 0-255 (None: the default orange)."""
+    r, g, b = (int(c) for c in (PORCUPINE_COLOR if color is None else color)[:3])
+    return (f"mdcif porcupine #{structure.id_string} mode {mode} scale {scale:g} color "
+            f"#{r:02x}{g:02x}{b:02x} radius {radius:g} minLength {min_length:g} scope {scope}")
+
+
+def arrow_surface(session, scope, mode):
+    """An empty Surface for one mode's arrows that sessions save whole: a plain Surface saves
+    only its place in the model tree (``SESSION_SAVE_DRAWING`` is False), and comes back from
+    a session grey and empty."""
+    from chimerax.core.models import Surface
+
     surf = Surface(f"{scope} mode {mode} porcupine", session)
+    surf.SESSION_SAVE_DRAWING = True                # vertices, triangles, colour
+    return surf
+
+
+def mdcif_porcupine(session, structure, mode=1, scale=3.0, color=None, scope="cluster",
+                    min_length=0.5, radius=0.15):
+    va, na, ta, n_arrows, _, ms, model = porcupine_geometry(session, structure, mode, scale,
+                                                            scope, min_length, radius)
+    surf = arrow_surface(session, scope, mode)
     surf.set_geometry(va, na, ta)
     surf.color = (color.uint8x4() if color is not None
-                  else np.array([255, 140, 0, 255], dtype=np.uint8))
+                  else np.array(PORCUPINE_COLOR, dtype=np.uint8))
     structure.add([surf])
-    session.logger.info(f"#{surf.id_string}: {len(starts)} arrows, {ms.scope} mode {mode} of "
+    session.logger.info(f"#{surf.id_string}: {n_arrows} arrows, {ms.scope} mode {mode} of "
                         f"model {model}, {scale:g} sd")
     if not structure.visible:
         session.logger.warning(f"#{structure.id_string} is hidden, and so are its arrows "
@@ -294,15 +414,16 @@ def _matches(copy, mode=None, scope=None, amplitude=None, frames=None):
         (mode, scope, amplitude, frames), have, strict=True))
 
 
-def _animate(session, structure, mode=None, scope=None, amplitude=None, frames=None):
-    """'mdcif animate' for a plot, logged as that command; None takes its default. The copy
-    is marked as made for a plot, so a plot may close it when it animates again."""
+def _animate(session, structure, mode=None, scope=None, amplitude=None, frames=None,
+             mark=PLOT_MADE):
+    """'mdcif animate' for a plot (``mark=ANIMATE_MADE``: for the Animate window), logged as
+    that command; None takes its default. The copy is marked as made by them, so they may
+    close it when they animate again."""
     mode, scope, amplitude, frames = (d if v is None else v for v, d in zip(
         (mode, scope, amplitude, frames), ANIMATE_DEFAULTS, strict=True))
-    log_equivalent_command(session, f"mdcif animate #{structure.id_string} mode {mode} "
-                                    f"amplitude {amplitude:g} frames {frames} scope {scope}")
+    log_equivalent_command(session, animate_command(structure, mode, amplitude, frames, scope))
     copy = mdcif_animate(session, structure, mode, amplitude, frames, scope)
-    setattr(copy, PLOT_MADE, True)
+    setattr(copy, mark, True)
     return copy
 
 
@@ -428,8 +549,9 @@ def reanimate(session, plot, model=None, mode=None, scope=None, amplitude=None, 
     """Animate a plot again with other settings (None = keep) and measure its series anew.
 
     The new copy is made from the model's structure (for the same model: the plot's source,
-    else the model, else the old copy). The old copy is then closed if the plot made it and
-    no other plot uses it, else stopped and hidden. Returns the new copy.
+    else the model, else the old copy). The old copy is then put away (``retire_copy``):
+    closed if the plot made it and no other plot uses it, else stopped and hidden. Returns the
+    new copy.
     """
     model = plot.model if model is None else model
     mode, scope, amplitude, frames = (old if v is None else v for v, old in zip(
@@ -452,12 +574,8 @@ def reanimate(session, plot, model=None, mode=None, scope=None, amplitude=None, 
     plot.set_animation(copy, source)
     for s, v in zip(plot.series, values, strict=True):
         s.values = v
-    if _alive(old) and old is not copy:
-        if old_own and not any(p.structure is old for p in plots(session)):
-            session.models.close([old])
-        else:
-            run(session, f"coordset stop #{old.id_string}", log=False)
-            old.display = False
+    if old is not copy:
+        retire_copy(session, old, old_own)
     plot.changed()
     return copy
 
@@ -511,7 +629,7 @@ def mdcif_plot(session, kind, atoms, mode=None, scope=None, amplitude=None, fram
     plot = plot_for(session, structures[0], mode, scope, amplitude, frames, new)
     series = add_series(session, plot, _atom_keys(atoms))
     if session.ui.is_gui:
-        from .tool import show_plot
+        from .analyze_tool import show_plot
 
         show_plot(session, plot)
     if save_data is not None:

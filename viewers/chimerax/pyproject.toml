@@ -16,7 +16,7 @@ build-backend = "chimerax.bundle_builder.cx_pep517"
 name = "ChimeraX-MDCIF"
 license = { text = "MIT" }
 authors = [{ name = "The mdcif authors" }]
-description = "Read mdcif files (opened as usual or with 'mdcif open'): switch between MD cluster models, animate essential modes, draw porcupine plots, plot distances/angles/dihedrals along a mode"
+description = "Read mdcif files (opened as usual or with 'mdcif open'): switch between MD cluster models, animate essential modes, draw porcupine plots, plot distances/angles/dihedrals along a mode; commands and an MDCIF menu of windows with sliders"
 dependencies = ["ChimeraX-Core ~=1.7"]   # Python >= 3.10 (zip strict)
 dynamic = ["classifiers", "requires-python", "version"]
 
@@ -25,15 +25,19 @@ content-type = "text"
 text = """Viewer for mdcif files (MD trajectories summarized as PDB-IHM-compatible
 mmCIF): switch between cluster representatives, animate each model along its
 own PCA / quasi-harmonic modes, draw porcupine plots, and plot a distance,
-angle or dihedral at every frame of a mode animation (command 'mdcif plot',
-tool MDCIF Plot). mdcif files opened the normal way (open, File > Open, drag
-and drop) get their mode data too."""
+angle or dihedral at every frame of a mode animation (command 'mdcif plot').
+The MDCIF menu (before Help) opens three windows: Porcupine (arrows for one or
+more modes, with sliders), Animate (play a mode with sliders, save a movie)
+and Analyze (tabs; Geometry plots distances, angles and dihedrals). Every
+window action writes the equivalent command to the Log. mdcif files opened the
+normal way (open, File > Open, drag and drop) get their mode data too."""
 
 [tool.setuptools.dynamic]
 version = { attr = "src.__version__" }
 
 [tool.chimerax]
-custom-init = true                      # BundleAPI.initialize: "add models" handler (attach.py)
+custom-init = true                      # BundleAPI.initialize: "add models" handler (attach.py),
+                                        # the MDCIF menu (menu.py)
 min-session-version = 1
 max-session-version = 1
 categories = ["Structure Analysis"]
@@ -67,6 +71,15 @@ description = "Draw porcupine arrows for one mode of a model"
 category = "Structure Analysis"
 description = "Plot a distance, angle or dihedral along a mode animation"
 
-[tool.chimerax.tool."MDCIF Plot"]
+# The windows of the MDCIF menu (menu.py); BundleAPI.start_tool dispatches on the name
+[tool.chimerax.tool."MDCIF Porcupine"]
 category = "Structure Analysis"
-description = "Plot distances, angles or dihedrals at every frame of a mode animation"
+description = "Porcupine arrows for one or more modes of an mdcif model, with sliders"
+
+[tool.chimerax.tool."MDCIF Animate"]
+category = "Structure Analysis"
+description = "Play an mdcif model along one of its modes, with sliders; save a movie"
+
+[tool.chimerax.tool."MDCIF Analyze"]
+category = "Structure Analysis"
+description = "Analyses of an mdcif file in tabs: distances, angles and dihedrals along a mode animation"

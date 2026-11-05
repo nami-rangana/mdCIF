@@ -1,8 +1,10 @@
-"""The MDCIF Plot window: distances, angles and dihedrals along a mode animation (GUI only).
+"""The Geometry tab of the MDCIF Analyze window: distances, angles and dihedrals along a mode
+animation (GUI only; until 0.4.0 the "MDCIF Plot" window).
 
-Opened from Tools > Structure Analysis > MDCIF Plot (empty) or by 'mdcif plot' with the GUI;
-imported only then (Qt). The plot itself (state, drawing, files) is in plot.py and the
-ChimeraX work in cmd.py, so the window and the command share their plots:
+The window around it (``analyze_tool.MdcifAnalyze``, opened from MDCIF > Analyze..., or by
+'mdcif plot' with the GUI) hands it a page to build into and gives it its title; the tab is a
+plain object, imported only with the GUI (Qt). The plot itself (state, drawing, files) is in
+plot.py and the ChimeraX work in cmd.py, so the tab and the command share their plots:
 
     Model [1: cluster 1] Scope [cluster] Mode [1] Amplitude [3.00 sd] Frames [30]
     Measure [Distance] Atoms [10CA] [40CA] [Add] [Add selected atoms]   [Remove] [Remove all]
@@ -15,15 +17,15 @@ Measure sets what Add and Add selected atoms measure, and shows that many atom b
 distance, 3 for an angle, 4 for a dihedral); each kind gets its own panel, so a plot can show
 all three. Atoms are typed as residue number and atom name (38CA, 38 CA, 38@CA; A:38CA when
 the number is in several chains) and looked up on the plot's animation (on its model if the
-animation was closed, which is then animated again), or in an empty window on the first shown
-mdcif structure; the boxes keep their text. Add selected atoms takes the selection in picking
-order.
+animation was closed, which is then animated again), or in an empty tab on its target (the
+animation of the Animate window's Plot geometry... link) or else the first shown mdcif
+structure; the boxes keep their text. Add selected atoms takes the selection in picking order.
 
 Changing Model, Scope, Mode, Amplitude or Frames animates again (``cmd.reanimate``) and
-measures every series anew. An empty window takes the first atoms' animation: atoms on an
+measures every series anew. An empty tab takes the first atoms' animation: atoms on an
 animate copy use that copy (the controls then show its settings), atoms on a model are
 animated with the controls' settings. Play plays from frame 1 (a 'coordset' loop can't
-start mid-range). Plot windows are not saved in sessions.
+start mid-range). Analyze windows are not saved in sessions.
 
 While the motion plays only the frame marks are redrawn: they are animated matplotlib
 artists (one-point lines, not scatters), drawn over a copy of the rest of the canvas taken
@@ -31,44 +33,43 @@ after each full draw, and only the panels are repainted; frame changes that arri
 runs are shown once. The values line under the plot is cut to the window's width (the whole
 of it is its tooltip), so it never widens the window.
 
-For scripts (``runscript``, ``mdcif.chimerax.ChimeraX``): ``windows(session)`` lists the open
-windows. Each has ``plot`` (a ``plot.Plot``: ``series``, ``kinds``, ``structure``, ...),
+For scripts (``runscript``, ``mdcif.chimerax.ChimeraX``): ``analyze_tool.windows(session)``
+lists the Geometry tabs of the open Analyze windows, oldest first. Each has ``host`` (its
+window), ``plot`` (a ``plot.Plot``: ``series``, ``kinds``, ``structure``, ...),
 ``figure`` / ``canvas`` (matplotlib; ``figure.axes`` = the panels, top to bottom),
 ``go_to_frame(k)`` (what a click does), ``play()``, ``stop()``, ``add_atoms(atoms)``,
 ``add_text(*texts)`` (typed atoms: ``add_text("10CA", "40CA")``), ``set_settings(model=,
 scope=, mode=, amplitude=, frames=)``, ``set_kind(kind)``, ``save_plot(path)``,
 ``save_data(path)``, ``shown_frame`` and ``canvas_position(frame, series=0)`` (where a click
-on that frame of ``plot.series[series]`` lands, canvas pixels from top left).
+on that frame of ``plot.series[series]`` lands, canvas pixels from top left);
+``tool_window``, ``display(show)`` and ``delete()`` act on the whole window, as before.
 """
 
 import os
-from contextlib import contextmanager
 
 from chimerax.core.commands import run
 from chimerax.core.errors import UserError
-from chimerax.core.tools import ToolInstance
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from Qt.QtCore import Qt, QTimer
+from Qt.QtCore import Qt
 from Qt.QtGui import QColor, QIcon, QPixmap
 from Qt.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDoubleSpinBox,
-    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
 )
 
 from . import attach, cmd
 from .mdcif_data import MEASURES
+from .menu import ANALYZE
 from .plot import (
     A_KIND,
     IMAGE_SIZE,
@@ -81,8 +82,8 @@ from .plot import (
     parse_atom,
     plots,
 )
+from .widgets import ElidedLabel, FrameWatcher, Guarded, Note, ask_save_path, quiet
 
-TOOL_NAME = "MDCIF Plot"
 KINDS = list(MEASURES)
 EXAMPLES = {"distance": "10CA 40CA", "angle": "10CA 11CA 12CA",
             "dihedral": "10CA 11CA 12CA 13CA"}
@@ -92,80 +93,46 @@ ATOM_TIP = ("Residue number and atom name: 38CA, 38 CA or 38@CA (38@1HB when the
             "adds.")
 IMAGE_FILTERS = ["PNG image (*.png)", "SVG image (*.svg)", "PDF document (*.pdf)"]
 DATA_FILTERS = ["CSV file (*.csv)"]
-ERROR_COLOR, NOTE_COLOR = "#d03b3b", "#52514e"
 CANVAS_HEIGHT, PANEL_PIXELS = 200, 150          # minimum canvas height, + per further panel
 
 
-def windows(session):
-    """The open MDCIF Plot windows."""
-    return session.tools.find_by_class(MdcifPlot)
+class GeometryTab(Guarded):
+    """The Geometry tab, built into ``page`` (a QWidget of the ``host`` window, which has
+    ``session``, ``tool_window``, ``set_title(text)``, ``display(show)`` and ``delete()``).
+    The host calls ``set_plot`` once the window is managed, and ``cleanup`` when it closes."""
 
-
-def show_plot(session, plot):
-    """Show ``plot`` in its window: the one showing it, else an empty one, else a new one."""
-    found = windows(session)
-    tool = (next((t for t in found if t.plot is plot), None)
-            or next((t for t in found if t.plot is None), None))
-    if tool is None:
-        tool = MdcifPlot(session, plot=plot)
-    elif tool.plot is not plot:
-        tool.set_plot(plot)
-    tool.display(True)
-    return tool
-
-
-class _ElidedLabel(QLabel):
-    """A one-line label that never sets the window's width: text too long for it is cut
-    with an ellipsis, and the whole text is its tooltip (and what ``text()`` returns)."""
-
-    def __init__(self):
-        super().__init__()
-        self._full = ""
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-
-    def setText(self, text):                            # Qt's names: overridden
-        self._full = text
-        self.setToolTip(text)
-        self._elide()
-
-    def text(self):
-        return self._full
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._elide()
-
-    def _elide(self):
-        super().setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight,
-                                                      max(self.width(), 0)))
-
-
-class MdcifPlot(ToolInstance):
-    SESSION_SAVE = False                # the animate copy is saved in sessions, the window not
-
-    def __init__(self, session, tool_name=TOOL_NAME, plot=None):
+    def __init__(self, host, page):
         from chimerax.core.models import END_DELETE_MODELS
-        from chimerax.ui import MainToolWindow
 
-        super().__init__(session, tool_name)
+        self.host, self.session = host, host.session
         self.plot = None
         self.kind = KINDS[0]                            # what Add / Add selected atoms measure
-        # settings for the first animation of an empty window: mode, scope, amplitude, frames
+        # settings for the first animation of an empty tab: mode, scope, amplitude, frames
         self.settings = dict(zip(("mode", "scope", "amplitude", "frames"),
                                  cmd.ANIMATE_DEFAULTS, strict=True))
+        self.target = self._target_source = None        # where an empty tab takes typed atoms
         self.shown_frame = None                         # frame the marks are on
-        self._marker = self._watched = self._watch_handler = None
+        self._marker = None
+        self._watcher = FrameWatcher(self._frame_changed)
         self._background = None                         # the canvas without the frame marks
         self._columns = {}                              # legend columns of the last full draw
         self._boxes = []                                # the panels' boxes: what blits repaint
-        self._frame_due = False                         # a frame change waits for Qt
         self._error = self._notice = ""                 # red note; grey one, till next action
-        self.tool_window = MainToolWindow(self)
-        self._build(self.tool_window.ui_area)
-        self._delete_handler = session.triggers.add_handler(END_DELETE_MODELS,
-                                                            self._models_deleted)
-        self.tool_window.manage(placement=None)         # floating: a plot needs the width
-        self.set_plot(plot)
+        self.page = page
+        self._build(page)
+        self._delete_handler = self.session.triggers.add_handler(END_DELETE_MODELS,
+                                                                 self._models_deleted)
+
+    # the whole window, for scripts written for the MDCIF Plot window (0.3.0 - 0.4.0)
+    @property
+    def tool_window(self):
+        return self.host.tool_window
+
+    def display(self, show):
+        self.host.display(show)
+
+    def delete(self):
+        self.host.delete()
 
     # ------------------------------------------------------------------ layout
     def _build(self, area):
@@ -245,9 +212,7 @@ class MdcifPlot(ToolInstance):
         self.series_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.series_list.setMaximumHeight(4 * self.series_list.fontMetrics().height() + 12)
         layout.addWidget(self.series_list)
-        self.note = QLabel()
-        self.note.setWordWrap(True)
-        self.note.hide()
+        self.note = Note()
         layout.addWidget(self.note)
 
         self.figure = Figure(figsize=IMAGE_SIZE, dpi=100)
@@ -267,7 +232,7 @@ class MdcifPlot(ToolInstance):
         self.stop_button.setToolTip("Stop the animation (a click on the plot also stops it, "
                                     "at that frame)")
         self.stop_button.clicked.connect(lambda: self._guard(self.stop))
-        self.info = _ElidedLabel()                      # values at the frame: may be long
+        self.info = ElidedLabel()                       # values at the frame: may be long
         self.save_plot_button = QPushButton("Save plot...")
         self.save_plot_button.clicked.connect(lambda: self._guard(self.save_plot))
         self.save_data_button = QPushButton("Save data...")
@@ -280,33 +245,10 @@ class MdcifPlot(ToolInstance):
         layout.addLayout(row)
         self._show_boxes()
 
-    @contextmanager
     def _quiet(self):
         """Set the controls without their signals (which would animate again)."""
-        boxes = (self.model_box, self.scope_box, self.mode_box, self.amplitude_box,
-                 self.frames_box, self.kind_box)
-        was = [b.blockSignals(True) for b in boxes]
-        try:
-            yield
-        finally:
-            for b, w in zip(boxes, was, strict=True):
-                b.blockSignals(w)
-
-    def _guard(self, func, *args, **kw):
-        """Run a button's action; a UserError goes to the window (and the Log as a warning)
-        instead of a dialog, and the controls are set back to the plot. A notice (grey) is
-        shown until the next action."""
-        shown, self._notice = bool(self._error or self._notice), ""
-        try:
-            func(*args, **kw)
-        except UserError as exc:
-            self._error = str(exc)
-            self.session.logger.warning(self._error)
-            self.refresh()
-        else:
-            self._error = ""
-            if shown or self._notice:
-                self._update_note()
+        return quiet(self.model_box, self.scope_box, self.mode_box, self.amplitude_box,
+                     self.frames_box, self.kind_box)
 
     def _show_boxes(self):
         """Show as many atom boxes as the measurement needs."""
@@ -327,6 +269,19 @@ class MdcifPlot(ToolInstance):
                 self.kind = plot.series[-1].kind
         self.refresh()
 
+    def set_target(self, structure, source=None):
+        """For an empty tab: take typed atoms on ``structure`` (the Animate window's copy, from
+        its Plot geometry... button; ``source``: the model it animates), whose settings the
+        controls then show."""
+        self.target, self._target_source = structure, source
+        if getattr(structure, "mdcif_copy", False):
+            have = {"mode": getattr(structure, "mdcif_mode", None),
+                    "scope": getattr(structure, "mdcif_scope", None),
+                    "amplitude": getattr(structure, "mdcif_amplitude", None),
+                    "frames": structure.num_coordsets}
+            self.settings.update({k: v for k, v in have.items() if v is not None})
+        self.refresh()
+
     def _plot_changed(self, plot):
         self._notice = ""                               # the plot changed: the grey note is old
         self.refresh()
@@ -337,7 +292,7 @@ class MdcifPlot(ToolInstance):
     def refresh(self):
         """Controls, series list, title and plot from the plot's current state."""
         plot = self.plot
-        self._watch(plot.structure if self._alive() else None)
+        self._watcher.watch(plot.structure if self._alive() else None)
         with self._quiet():
             self.model_box.clear()
             self.scope_box.clear()
@@ -381,10 +336,10 @@ class MdcifPlot(ToolInstance):
             button.setEnabled(has_series)
         kinds = plot.kinds if plot is not None else []
         if plot is None:
-            self.tool_window.title = TOOL_NAME
+            self.host.set_title(ANALYZE)
         else:
             what = f"{', '.join(kinds)} on " if kinds else ""
-            self.tool_window.title = f"{TOOL_NAME}: {what}{plot.spec}"
+            self.host.set_title(f"{ANALYZE}: {what}{plot.spec}")
         self.canvas.setMinimumHeight(CANVAS_HEIGHT + PANEL_PIXELS * max(len(kinds) - 1, 0))
         self._update_note()
         self._redraw()
@@ -396,15 +351,13 @@ class MdcifPlot(ToolInstance):
             return 0
 
     def _update_note(self):
-        text, color = self._error, ERROR_COLOR
+        text = self._error
         if not text:
-            text, color = self._notice, NOTE_COLOR
+            text = self._notice
         if not text and self.plot is not None and not self.plot.alive:
             text = (f"{self.plot.spec}, the animation of this plot, was closed: Save plot and "
                     "Save data still work; change a setting or add atoms to animate again.")
-        self.note.setText(text)
-        self.note.setStyleSheet(f"color: {color}")
-        self.note.setVisible(bool(text))
+        self.note.show_text(text, error=bool(self._error))
 
     def _shown_structure(self):
         """The first shown structure with mdcif data (a model or an animate copy), or None."""
@@ -415,9 +368,12 @@ class MdcifPlot(ToolInstance):
 
     def _show_atoms(self, structure=None):
         """The commands that make atoms pickable (a click on the cartoon selects whole
-        residues), for ``structure``, else the plot's copy, else a shown mdcif structure."""
+        residues), for ``structure``, else the plot's copy (an empty tab's target), else a
+        shown mdcif structure."""
         if structure is None and self._alive():
             structure = self.plot.structure
+        if structure is None and self.plot is None and cmd._alive(self.target):
+            structure = self.target
         if structure is None:
             structure = self._shown_structure()
         spec = f"#{structure.id_string}" if structure is not None else "#1"
@@ -497,34 +453,19 @@ class MdcifPlot(ToolInstance):
                           + (f": {' · '.join(parts)}" if parts else ""))
 
     # ------------------------------------------------------------------ ChimeraX triggers
-    def _watch(self, structure):
-        """Follow the current frame of ``structure`` (None: stop following)."""
-        if structure is self._watched:
-            return
-        if self._watch_handler is not None:
-            self._watch_handler.remove()
-        self._watched, self._watch_handler = structure, None
-        if structure is not None:
-            self._watch_handler = structure.triggers.add_handler("changes",
-                                                                 self._structure_changed)
-
-    def _structure_changed(self, _trigger, data):
-        """A new frame on screen: update the marks once Qt runs, once for any number of
-        changes before then."""
-        structure, changes = data
-        if ("active_coordset changed" in changes.structure_reasons()
-                and structure is self._watched and not self._frame_due):
-            self._frame_due = True
-            QTimer.singleShot(0, self._frame_changed)
-
-    def _frame_changed(self):
-        self._frame_due = False
-        if self._watched is not None and self._alive():      # not closed in the meantime
-            self._show_frame(self._watched.active_coordset_id)
+    def _frame_changed(self, structure):
+        """A new frame on screen (``FrameWatcher``: once Qt runs, once for any number of
+        changes before then): move the marks."""
+        if self._alive():                               # not closed in the meantime
+            self._show_frame(structure.active_coordset_id)
 
     def _models_deleted(self, _trigger, _models):
-        if self._watched is not None and getattr(self._watched, "deleted", False):
+        watched = self._watcher.structure
+        if watched is not None and getattr(watched, "deleted", False):
             self._error = ""                            # the copy was closed: data kept
+            self.refresh()
+        elif self.plot is None and self.target is not None and not cmd._alive(self.target):
+            self.target = self._target_source = None    # an empty tab's target was closed
             self.refresh()
 
     # ------------------------------------------------------------------ actions
@@ -683,8 +624,8 @@ class MdcifPlot(ToolInstance):
 
     def _target_structure(self):
         """Where typed atoms are looked up: the plot's animate copy; with that closed, the
-        model it animated (animated again when the atoms are added); in an empty window, the
-        first shown mdcif structure."""
+        model it animated (animated again when the atoms are added); in an empty tab, its
+        target (``set_target``), else the first shown mdcif structure."""
         plot = self.plot
         if self._alive():
             return plot.structure
@@ -695,6 +636,8 @@ class MdcifPlot(ToolInstance):
                 raise UserError(f"no structure of model {plot.model} of "
                                 f"{os.path.basename(plot.path)} is open")
             return found
+        if cmd._alive(self.target):
+            return self.target
         found = self._shown_structure()
         if found is None:
             raise UserError("no mdcif model is shown: open an mdcif file (or show its model) "
@@ -703,12 +646,14 @@ class MdcifPlot(ToolInstance):
 
     def _add_keys(self, structure, keys):
         """Add the atoms ``keys`` of ``structure`` (a model or an animate copy) to the plot,
-        starting one in an empty window or animating again a plot whose copy was closed."""
+        starting one in an empty tab or animating again a plot whose copy was closed."""
         data, _ = cmd._data(self.session, structure)
         plot = self.plot
         if plot is None:
             if getattr(structure, "mdcif_copy", False):
                 copy, source = cmd.copy_for(self.session, structure)
+                if source is None and copy is self.target:      # the Animate window's model
+                    source = self._target_source
             else:
                 s = self.settings
                 copy, source = cmd.copy_for(self.session, structure, s["mode"], s["scope"],
@@ -747,18 +692,7 @@ class MdcifPlot(ToolInstance):
         base = os.path.splitext(os.path.basename(plot.path))[0]
         default = (f"{base}_model{plot.model}_{plot.scope}_mode{plot.mode}_"
                    f"{'-'.join(plot.kinds)}{suffix}")
-        dialog = QFileDialog(self.tool_window.ui_area, title)
-        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
-        dialog.setFileMode(QFileDialog.FileMode.AnyFile)
-        dialog.setOption(QFileDialog.Option.DontUseNativeDialog)
-        dialog.setNameFilters(filters)
-        dialog.selectFile(os.path.join(os.getcwd(), default))
-        if not dialog.exec() or not dialog.selectedFiles():
-            return None
-        path = dialog.selectedFiles()[0]
-        if not os.path.splitext(path)[1]:               # suffix from the chosen file type
-            path += dialog.selectedNameFilter().split("(*")[-1].rstrip(")")
-        return path
+        return ask_save_path(self.page, title, filters, default)
 
     def save_plot(self, path=None):
         """The plot as PNG, SVG or PDF (by suffix; every panel, 6 in wide, 3.5 in high for one
@@ -781,9 +715,9 @@ class MdcifPlot(ToolInstance):
         return path
 
     # ------------------------------------------------------------------ cleanup
-    def delete(self):
-        """Closing the window: its handlers go, and its plot with it (the copy stays)."""
-        self._watch(None)                               # also stops a pending frame update
+    def cleanup(self):
+        """The window closes: the tab's handlers go, and its plot with it (the copy stays)."""
+        self._watcher.watch(None)                       # also drops a pending frame update
         self.session.triggers.remove_handler(self._delete_handler)
         for cid in self._mouse:
             self.canvas.mpl_disconnect(cid)
@@ -794,4 +728,3 @@ class MdcifPlot(ToolInstance):
             found = plots(self.session)
             if not plot.listeners and plot in found:
                 found.remove(plot)
-        super().delete()
