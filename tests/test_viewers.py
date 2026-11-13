@@ -30,11 +30,11 @@ def _load(name, path):
 
 @pytest.fixture(scope="module")
 def vdata():
-    return _load("viewer_mdcif_data", PYMOL_DIR / "mdcif_pymol" / "mdcif_data.py")
+    return _load("viewer_mdcif_data", PYMOL_DIR / "mdcif_data.py")
 
 
 def test_viewer_copies_are_identical():
-    a = (PYMOL_DIR / "mdcif_pymol" / "mdcif_data.py").read_bytes()
+    a = (PYMOL_DIR / "mdcif_data.py").read_bytes()
     b = (CHIMERAX_SRC / "mdcif_data.py").read_bytes()
     assert a == b, "viewers/*/mdcif_data.py differ: copy one over the other"
 
@@ -165,12 +165,13 @@ def test_measure(vdata):
 
 @pytest.fixture(scope="module")
 def pymol_plugin():
+    """viewers/pymol loaded as the package mdcif_pymol (as PyMOL loads an installed plugin, by
+    file: putting viewers/ on sys.path would make it 'pymol', PyMOL's own name)."""
     pytest.importorskip("pymol")
-    sys.path.insert(0, str(PYMOL_DIR))
-    try:
-        import mdcif_pymol
-    finally:
-        sys.path.remove(str(PYMOL_DIR))
+    spec = importlib.util.spec_from_file_location("mdcif_pymol", PYMOL_DIR / "__init__.py")
+    mdcif_pymol = importlib.util.module_from_spec(spec)
+    sys.modules["mdcif_pymol"] = mdcif_pymol
+    spec.loader.exec_module(mdcif_pymol)
     from pymol import cmd
 
     mdcif_pymol.__init_plugin__()
@@ -178,23 +179,290 @@ def pymol_plugin():
     cmd.reinitialize()
 
 
-def test_pymol_plugin_commands(pymol_plugin, adk_mdcif):
+@pytest.fixture()
+def pm(pymol_plugin):
+    """The PyMOL plugin on an empty scene (no objects, no plots)."""
+    from mdcif_pymol import plot as pplot
+
     mp, cmd = pymol_plugin
+    cmd.reinitialize()
+    pplot._PLOTS.clear()
+    yield mp, cmd
+    cmd.mstop()
+
+
+def _sel(obj, key):
+    """A PyMOL selection of one atom by its (chain, resi, name) key."""
+    chain, resi, name = key
+    return f"/{obj}//{chain}/{resi}/{name}"
+
+
+def test_pymol_plugin_commands(pm, adk_mdcif):
+    """Each model is an object in a group; the old calls on the group still work."""
+    from pymol import CmdException
+
+    mp, cmd = pm
     path, summary = adk_mdcif
-    name = mp.mdcif_load(str(path), "adk", quiet=1)
-    assert cmd.count_states(name) == summary.n_models
-    morph = mp.mdcif_morph(name, steps=3)
-    assert cmd.count_states(morph) == 3 * summary.n_models
-    anim = mp.mdcif_animate(name, model=2, mode=1, amplitude=2.0, frames=8)
-    assert cmd.count_states(anim) == 8
-    moved = cmd.get_coords(anim, state=3) - cmd.get_coords(name, state=2)
+    n = summary.n_models
+    objects = mp.mdcif_load(str(path), "adk", quiet=1)
+    assert objects == [f"adk_m{m}" for m in range(1, n + 1)]
+    assert cmd.get_type("adk") == "object:group"
+    assert all(cmd.count_states(o) == 1 for o in objects)
+    morph = mp.mdcif_morph("adk", steps=3, quiet=1)
+    assert morph == "adk_morph" and cmd.count_states(morph) == 3 * n
+    anim = mp.mdcif_animate("adk", model=2, mode=1, amplitude=2.0, frames=8, quiet=1)
+    assert anim == "adk_m2_mode1" and cmd.count_states(anim) == 8
+    moved = cmd.get_coords(anim, state=3) - cmd.get_coords("adk_m2", state=1)
     assert np.abs(moved).max() > 0.1
-    g = mp.mdcif_animate(name, model=1, mode=2, frames=6, scope="global")
-    assert g.endswith("_global2") and cmd.count_states(g) == 6
-    porc = mp.mdcif_porcupine(name, model=1, mode=1)
-    assert porc in cmd.get_names("objects")
-    with pytest.raises(ValueError):
-        mp.mdcif_animate(name, scope="sideways")
+    assert "adk_m2" not in cmd.get_names("objects", enabled_only=1)     # the model is hidden
+    g = mp.mdcif_animate("adk", model=1, mode=2, frames=6, scope="global", quiet=1)
+    assert g == "adk_m1_global2" and cmd.count_states(g) == 6
+    porc = mp.mdcif_porcupine("adk", model=1, mode=1, quiet=1)
+    assert porc == "adk_m1_mode1_porcupine" and porc in cmd.get_names("objects")
+    assert mp.mdcif_porcupine("adk_m2", mode=2, quiet=1) == "adk_m2_mode2_porcupine"
+    with pytest.raises(CmdException, match="scope must be"):
+        mp.mdcif_animate("adk", scope="sideways")
+    with pytest.raises(CmdException, match="frames must be at least 3"):
+        mp.mdcif_animate("adk_m1", frames=2)
+    with pytest.raises(CmdException, match="has no model 99"):
+        mp.mdcif_animate("adk", model=99)
+    with pytest.raises(CmdException, match="no object"):
+        mp.mdcif_porcupine("nothing_here")
+    with pytest.raises(CmdException, match="need at least two models"):
+        mp.mdcif_morph("adk_m1")
+
+
+def test_pymol_load_hook(pm, adk_mdcif, adk_reference):
+    """'load' of an mdcif file makes the group and its objects; plain mmCIF loads as before."""
+    from mdcif_pymol import attach
+
+    _, cmd = pm
+    path, summary = adk_mdcif
+    cmd.load(str(path))
+    name = path.stem
+    assert cmd.get_type(name) == "object:group"
+    e = attach.entry(f"{name}_m1")
+    assert e.model == 1 and e.group == name and e.data.models == list(
+        range(1, summary.n_models + 1))
+    cmd.load(str(adk_reference))
+    assert cmd.get_type(adk_reference.stem) == "object:molecule"
+    assert attach.entry(adk_reference.stem) is None
+    assert attach.is_hooked()
+
+
+def test_pymol_animate_retune_and_arrows(pm, adk_mdcif):
+    """Animate frames and porcupine arrows are those of mdcif_data; a copy is retuned in
+    place."""
+    from mdcif_pymol import attach
+    from mdcif_pymol import commands as c
+    from mdcif_pymol import mdcif_data as md
+    from pymol import CmdException
+
+    mp, cmd = pm
+    mp.mdcif_load(str(adk_mdcif[0]), "adk", quiet=1)
+    model = attach.entry("adk_m1")
+    keys, xyz = c._keys("adk_m1"), cmd.get_coords("adk_m1", 1)
+    ms = model.data.cluster_set(1)
+    name = mp.mdcif_animate("adk_m1", mode=1, amplitude=2.0, frames=10, quiet=1)
+    got = np.array([cmd.get_coords(name, k) for k in range(1, 11)])
+    np.testing.assert_allclose(got, md.mode_frames(xyz, keys, ms, 1, 2.0, 10), atol=2e-3)
+    copy = attach.entry(name)
+    assert (copy.copy, copy.mode, copy.scope, copy.amplitude, copy.source) == (
+        True, 1, "cluster", 2.0, "adk_m1")
+    assert c.retune_animation(copy, mode=2, frames=12) is copy
+    assert copy.name == "adk_m1_mode2" and cmd.count_states(copy.name) == 12
+    got = np.array([cmd.get_coords(copy.name, k) for k in range(1, 13)])
+    np.testing.assert_allclose(got, md.mode_frames(xyz, keys, ms, 2, 2.0, 12), atol=2e-3)
+    cgo, n, n_short, _ = c.porcupine_cgo(model, 1, 3.0, "cluster", 0.5, 0.15)
+    starts, ends = md.arrows(xyz, keys, ms, 1, 3.0, 0.5)
+    assert n == len(starts) and n + n_short == len(ms.keys)
+    arrows = np.array(cgo, float).reshape(n, 31)        # a cylinder (14) and a cone (17) each
+    np.testing.assert_allclose(arrows[:, 1:4], starts, atol=1e-4)
+    np.testing.assert_allclose(arrows[:, 18:21], ends, atol=1e-4)
+    on_copy = c.porcupine_cgo(copy, 1, 3.0, "cluster", 0.5, 0.15)[0]    # from its state 1
+    np.testing.assert_allclose(on_copy, cgo, atol=2e-3)
+    with pytest.raises(CmdException, match="radius must be positive"):
+        mp.mdcif_porcupine("adk_m1", radius=0)
+    with pytest.raises(CmdException, match="no arrows to draw"):
+        mp.mdcif_porcupine("adk_m1", min_length=1000)
+    assert c._rgb("0x228b22") == pytest.approx((34 / 255, 139 / 255, 34 / 255))
+    assert c._rgb("#228b22") == c._rgb((34, 139, 34))
+    assert c.porcupine_command("adk_m1", 2, 2.0, (34, 139, 34)) == (
+        "mdcif_porcupine adk_m1, mode=2, scale=2, color=0x228b22, scope=cluster, "
+        "min_length=0.5, radius=0.15")
+
+
+def test_pymol_plot(pm, adk_mdcif, tmp_path):
+    """mdcif_plot: values equal PyMOL's own measurements at every frame; panels, reuse, files."""
+    from mdcif_pymol import attach
+    from mdcif_pymol import commands as c
+    from mdcif_pymol.plot import plots
+    from pymol import CmdException
+
+    mp, cmd = pm
+    mp.mdcif_load(str(adk_mdcif[0]), "adk", quiet=1)
+    ca = [k for k in c._keys("adk_m1") if k[2] == "CA"]
+    a, b, d, f = ca[10], ca[60], ca[11], ca[12]
+    values = mp.mdcif_plot("distance", _sel("adk_m1", a), _sel("adk_m1", b), quiet=1)
+    plot = plots()[-1]
+    copy = plot.entry
+    assert copy.name == "adk_m1_mode1" and copy.made == "plot" and plot.source.name == "adk_m1"
+    ref = [cmd.get_distance(_sel(copy.name, a), _sel(copy.name, b), state=k) for k in range(1, 31)]
+    np.testing.assert_allclose(values, ref, atol=1e-4)
+    angle = mp.mdcif_plot("angle", _sel(copy.name, a), _sel(copy.name, d), _sel(copy.name, f),
+                          quiet=1)
+    ref = [cmd.get_angle(_sel(copy.name, a), _sel(copy.name, d), _sel(copy.name, f), state=k)
+           for k in range(1, 31)]
+    np.testing.assert_allclose(angle, ref, atol=1e-3)
+    four = [_sel(copy.name, k) for k in (a, d, f, ca[13])]
+    dihedral = mp.mdcif_plot("dihedral", *four, quiet=1)
+    ref = [cmd.get_dihedral(*four, state=k) for k in range(1, 31)]
+    np.testing.assert_allclose((np.array(dihedral) - ref + 180) % 360 - 180, 0, atol=1e-3)
+    assert plots() == [plot] and plot.kinds == ["distance", "angle", "dihedral"]
+    mp.mdcif_plot("distance", _sel("adk_m1", b), _sel("adk_m1", a), quiet=1)  # reversed: same
+    assert len(plot.series) == 3 and plots() == [plot]
+    csv_path, png_path = tmp_path / "p.csv", tmp_path / "p.png"
+    mp.mdcif_plot("distance", _sel(copy.name, a), _sel(copy.name, b), save_data=str(csv_path),
+                  quiet=1)
+    lines = csv_path.read_text().splitlines()
+    assert lines[0] == f"# mdcif plot (mdcif_pymol {mp.__version__})"
+    assert "PyMOL's get_dihedral" in lines[8] and lines[9].startswith("frame,")
+    assert len(lines) == 10 + 30
+    if importlib.util.find_spec("matplotlib") is not None:
+        mp.mdcif_plot("distance", _sel(copy.name, a), _sel(copy.name, b), save_image=str(png_path),
+                      quiet=1)
+        assert png_path.stat().st_size > 1000
+    new = mp.mdcif_plot("distance", _sel("adk_m1", a), _sel("adk_m1", b), new=1, quiet=1)
+    assert len(plots()) == 2 and plots()[-1].entry.name == "adk_m1_mode1_2"
+    np.testing.assert_allclose(new, values)
+    mp.mdcif_plot("distance", _sel("adk_m1", a), _sel("adk_m1", b), mode=2, quiet=1)
+    assert plots()[-1].entry.name == "adk_m1_mode2" and len(plots()) == 3
+    sele = f"{_sel('adk_m1', a)} or {_sel('adk_m1', b)}"           # one selection of 2 atoms
+    assert mp.mdcif_plot("distance", sele, mode=1, quiet=1) == pytest.approx(values)
+    with pytest.raises(CmdException, match="needs 3 atoms"):
+        mp.mdcif_plot("angle", _sel("adk_m1", a), _sel("adk_m1", b))
+    with pytest.raises(CmdException, match="must be in one object"):
+        mp.mdcif_plot("distance", _sel("adk_m1", a), _sel("adk_m2", b))
+    with pytest.raises(CmdException, match="selects 0 atoms"):
+        mp.mdcif_plot("distance", _sel("adk_m1", a), "/adk_m1//Z/9999/CA")
+    with pytest.raises(CmdException, match="save_image"):
+        mp.mdcif_plot("distance", _sel("adk_m1", a), _sel("adk_m1", b), save_image="x.gif")
+    assert attach.entry("adk_m1_mode1").made == "plot"
+
+
+def test_pymol_plot_reanimate(pm, adk_mdcif):
+    """Another setting animates anew and measures again; the plot's own copy is deleted."""
+    from mdcif_pymol import attach
+    from mdcif_pymol import commands as c
+
+    mp, cmd = pm
+    mp.mdcif_load(str(adk_mdcif[0]), "adk", quiet=1)
+    ca = [k for k in c._keys("adk_m1") if k[2] == "CA"]
+    plot = c.plot_for(attach.entry("adk_m1"))
+    c.add_series(plot, [ca[10], ca[60]], quiet=1)
+    first, old = plot.series[0].values.copy(), plot.entry
+    copy = c.reanimate(plot, amplitude=1.0)
+    assert plot.entry is copy and plot.amplitude == 1.0 and not old.alive
+    assert np.ptp(plot.series[0].values) < np.ptp(first)
+    copy2 = c.reanimate(plot, model=2, frames=12)
+    assert copy2.model == 2 and plot.n_frames == 12 and len(plot.series[0].values) == 12
+    assert plot.source.name == "adk_m2" and not copy.alive
+
+
+def test_pymol_session_round_trip(pm, adk_mdcif, tmp_path):
+    """A .pse keeps the mdcif data of models and copies; a file that is gone is reported."""
+    import shutil
+
+    from mdcif_pymol import attach
+    from pymol import CmdException
+
+    mp, cmd = pm
+    moved = tmp_path / "adk.cif"
+    shutil.copy(adk_mdcif[0], moved)
+    mp.mdcif_load(str(moved), "adk", quiet=1)
+    anim = mp.mdcif_animate("adk_m1", mode=2, amplitude=1.5, frames=6, quiet=1)
+    session = tmp_path / "s.pse"
+    cmd.save(str(session))
+    cmd.reinitialize()
+    assert attach.entries() == []
+    cmd.load(str(session))
+    copy = attach.entry(anim)
+    assert (copy.copy, copy.model, copy.mode, copy.amplitude) == (True, 1, 2, 1.5)
+    assert attach.entry("adk_m2").model == 2
+    assert mp.mdcif_porcupine(anim, mode=1, quiet=1) == f"{anim}_mode1_porcupine"
+    cmd.reinitialize()
+    moved.unlink()
+    cmd.load(str(session))
+    with pytest.raises(CmdException, match="is gone"):
+        mp.mdcif_porcupine("adk_m1")
+
+
+def test_pymol_movie(pm, adk_mdcif, tmp_path):
+    """mdcif_movie: one GIF frame per state of the copy (ray-traced without the GUI)."""
+    from pymol import CmdException
+
+    image = pytest.importorskip("PIL.Image")
+    mp, cmd = pm
+    mp.mdcif_load(str(adk_mdcif[0]), "adk", quiet=1)
+    anim = mp.mdcif_animate("adk_m1", frames=5, quiet=1)
+    gif = mp.mdcif_movie(str(tmp_path / "m.gif"), anim, width=80, height=60, quiet=1)
+    with image.open(gif) as im:
+        assert im.n_frames == 5 and im.size == (80, 60)
+    with pytest.raises(CmdException, match="a movie must be"):
+        mp.mdcif_movie(str(tmp_path / "m.avi"), anim)
+
+
+def test_pymol_windows_offscreen(pm, adk_mdcif, tmp_path, monkeypatch):
+    """The three windows without a screen: arrows drawn, kept and cleared; a copy retuned in
+    place, or made anew when a plot measures on it; typed atoms; a click's frame."""
+    pytest.importorskip("matplotlib")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    qt = pytest.importorskip("pymol.Qt")
+    app = qt.QtWidgets.QApplication.instance() or qt.QtWidgets.QApplication([])
+
+    from mdcif_pymol import commands as c
+    from mdcif_pymol.porcupine_tool import MdcifPorcupine
+
+    def spin():
+        for _ in range(5):
+            app.processEvents()
+
+    mp, cmd = pm
+    mp.mdcif_load(str(adk_mdcif[0]), "adk", quiet=1)
+    p = MdcifPorcupine()
+    spin()
+    assert p.entry.name == "adk_m1" and p.live == {1: "adk_m1_mode1_porcupine"}
+    p.tick(2, True)
+    spin()
+    assert sorted(p.live) == [1, 2] and p.drawn[2][0] > 0
+    p.keep()
+    p.set_settings(radius=0.3)
+    spin()
+    assert p.live[1] == "adk_m1_mode1_porcupine_2" and "adk_m1_mode1_porcupine" in cmd.get_names()
+    p.clear()
+    assert "adk_m1_mode1_porcupine_2" not in cmd.get_names()
+    a = p.animate_mode()                                # the Animate window, on mode 1
+    spin()
+    assert a.copy.name == "adk_m1_mode1" and a.copy.made == c.ANIMATE_MADE
+    a.set_settings(mode=2, frames=12)
+    assert a.copy.name == "adk_m1_mode2" and cmd.count_states("adk_m1_mode2") == 12
+    a.go_to_frame(5)
+    assert cmd.get_frame() == 5 and not c.playing()
+    host = a.plot_geometry()
+    tab = host.geometry
+    ca = [k for k in c._keys("adk_m1") if k[2] == "CA"]
+    tab.add_text(f"{ca[10][1]}CA", f"{ca[60][1]}CA")
+    assert tab.plot.entry is a.copy and len(tab.plot.series) == 1
+    tab.go_to_frame(4)
+    assert cmd.get_frame() == 4 and tab.info.text().startswith("frame 4 / 12")
+    tab.save_plot(str(tmp_path / "w.png"))
+    assert (tmp_path / "w.png").stat().st_size > 1000
+    old = a.copy
+    a.set_settings(amplitude=1.0)                       # the plot measures on the copy: new one
+    assert a.copy.name == "adk_m1_mode2_2" and old.alive and tab.plot.entry is old
+    for window in (p, a, host):
+        window.delete()
+    spin()
 
 
 # --------------------------------------------------------------------------- ChimeraX

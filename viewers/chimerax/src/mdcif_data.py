@@ -1,6 +1,6 @@
 """mdcif file contents for viewers: pure Python + numpy, no mdcif / gemmi / host imports.
 
-Identical copies live in viewers/pymol/mdcif_pymol/ and viewers/chimerax/src/ (the
+Identical copies live in viewers/pymol/ and viewers/chimerax/src/ (the
 viewers run in their host's own Python and must stay self-contained); keep them in
 sync - tests/test_viewers.py checks that they are identical.
 

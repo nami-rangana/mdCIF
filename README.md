@@ -1,8 +1,8 @@
 # mdcif — a shareable mmCIF object for MD trajectories
 
 > Status: **pre-alpha**. The core pipeline (`mdcif build | info | validate | landscape`) works
-> end to end (format draft v0.4); the PyMOL plugin works and is tested; the ChimeraX bundle is
-> implemented but has not yet been run inside ChimeraX.
+> end to end (format draft v0.4); the PyMOL plugin and the ChimeraX bundle work and are
+> tested in their host applications (commands and windows).
 
 The PDB works because everyone shares one object (PDB / mmCIF) without needing to know how it
 was produced. MD trajectories have no such object: they are large, engine-specific and hard to
@@ -41,7 +41,7 @@ See [docs/proposal.md](docs/proposal.md) for goals and milestones and
 |------|----------|
 | `src/mdcif/` | Core Python package: trajectory loading, clustering, modes, provenance, mmCIF writer/reader/validator, CLI |
 | `viewers/chimerax/` | ChimeraX bundle `ChimeraX-MDCIF` (`mdcif ...` commands) |
-| `viewers/pymol/mdcif_pymol/` | PyMOL plugin (`mdcif_*` commands) |
+| `viewers/pymol/` | PyMOL plugin `mdcif_pymol` (`mdcif_*` commands and the MDCIF menu's windows) |
 | `docs/spec/` | Format spec, IHM/PDBx category mapping, DDL2 extension dictionary |
 | `examples/` | Provenance template; 3GB1 MELD example with a walkthrough notebook; `examples/data/` holds local data (git-ignored) |
 | `tests/` | pytest suite; small fixtures in `tests/data/` |
@@ -163,22 +163,33 @@ mdcif porcupine #1.1 mode 1 scale 3 color orange
 Re-run `devel install` after changing the bundle. `amplitude`/`scale` are in standard deviations
 of the mode.
 
-### 5. Load the PyMOL plugin (development mode)
+### 5. Install the PyMOL plugin
 
-With the `mdcif` environment active, start `pymol` and type this in its command line (the leading
-`/` runs a line of Python):
+In PyMOL (incentive or open-source, 2.x or newer): *Plugin → Plugin Manager → Install New
+Plugin → Choose file…*, pick `viewers/pymol/__init__.py`, and restart PyMOL (the Plugin Manager
+names a plugin after its folder, so it lists this one as `pymol`). Then
+`load` opens an mdCIF file as one object per model, in a group:
 
 ```
-/import sys; sys.path.insert(0, "C:/path/to/mdcif/viewers/pymol"); import mdcif_pymol; mdcif_pymol.__init_plugin__()
-mdcif_load gb1.cif, gb1
+load gb1.cif, gb1                           # group gb1: gb1_m1, gb1_m2, ...
+mdcif_modes gb1
+mdcif_porcupine gb1_m1, mode=1, scale=3
+mdcif_animate gb1_m1, mode=1, amplitude=3
+mdcif_animate gb1_m2, mode=1, scope=global
 mdcif_morph gb1
-mdcif_animate gb1, model=1, mode=1, amplitude=3
-mdcif_animate gb1, model=2, mode=1, scope=global
-mdcif_porcupine gb1, model=1, mode=1, scale=3
+mdcif_plot distance, /gb1_m1//A/10/CA, /gb1_m1//A/40/CA
 ```
 
-Or install it permanently via *Plugin → Plugin Manager → Install New Plugin* and choose
-`viewers/pymol/mdcif_pymol/__init__.py`.
+The **MDCIF** menu opens windows that do the same with sliders (Porcupine, Animate, Analyze);
+the Analyze window needs matplotlib in PyMOL's Python (`<PyMOL folder>/python -m pip install
+matplotlib`). Step by step: [examples/view/pymol/tutorial.md](examples/view/pymol/tutorial.md).
+Without installing (development), type this on one line at PyMOL's command line; it loads
+`viewers/pymol` as the package `mdcif_pymol` (don't put `viewers/` on `sys.path`: the folder
+would then be imported as `pymol`, PyMOL's own name):
+
+```
+/import importlib.util as u, sys; s = u.spec_from_file_location("mdcif_pymol", "C:/path/to/mdcif/viewers/pymol/__init__.py"); m = sys.modules["mdcif_pymol"] = u.module_from_spec(s); s.loader.exec_module(m); m.__init_plugin__()
+```
 
 ### 6. View in a Jupyter notebook (py3Dmol)
 
