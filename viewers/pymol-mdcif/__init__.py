@@ -15,13 +15,15 @@ Usage (each model of the file becomes an object, in a group named after the file
 
 ``amplitude`` / ``scale`` are in standard deviations of the mode (k in k * sigma * v, sigma in
 angstroms: sqrt(lambda) for PCA, with the elements' standard masses taken out for quasi-harmonic
-modes). Self-contained: needs only PyMOL and numpy (and matplotlib for the plot window and plot
-images).
+modes). Self-contained: needs only PyMOL and numpy, and matplotlib for the plots of the Analyze
+window and plot images, which the plugin installs into PyMOL's Python with pip when it loads
+with PyMOL's window and PyMOL lacks it (``deps``).
 
 Modules: ``attach`` (the load hook, the registry of mdcif objects, sessions), ``commands``
 (the commands and their Qt-free helpers), ``plot`` (plots: data, drawing, files),
-``mdcif_data`` (the file, shared with the ChimeraX bundle). The windows (Qt, imported only with
-the GUI) are in the MDCIF menu (``menu.py``) and under Plugin > MDCIF: "MDCIF Porcupine"
+``mdcif_data`` (the file, shared with the ChimeraX bundle), ``deps`` (matplotlib). The windows
+(Qt, imported only with the GUI) are in the MDCIF menu (``menu.py``) and under Plugin > MDCIF:
+"MDCIF Porcupine"
 (``porcupine_tool.py``), "MDCIF Animate" (``animate_tool.py``) and "MDCIF Analyze"
 (``analyze_tool.py``, whose Geometry tab, ``geometry_tab.py``, is also opened by
 ``mdcif_plot``); shared Qt pieces in ``widgets.py``.
@@ -46,10 +48,11 @@ _OBJECT_ARG = ("mdcif_modes", "mdcif_morph", "mdcif_animate", "mdcif_porcupine")
 
 def __init_plugin__(app=None):
     """The plugin's init (PyMOL's plugin manager, or by hand): the commands, the load hook,
-    the session tasks, and the MDCIF menu when PyMOL has its window. Safe to call again."""
+    the session tasks, and with PyMOL's window the MDCIF menu and, if PyMOL lacks it, an
+    install of matplotlib in the background. Safe to call again."""
     from pymol import cmd
 
-    from . import attach, commands
+    from . import attach, commands, deps
 
     attach.register()
     for f in (mdcif, mdcif_load, mdcif_modes, mdcif_morph, mdcif_animate, mdcif_porcupine,
@@ -61,10 +64,13 @@ def __init_plugin__(app=None):
             cmd.auto_arg[0][name] = cmd.auto_arg[0]["enable"]
     except Exception:
         pass
-    if commands.gui_window() is not None:
+    gui = commands.gui_window() is not None
+    if gui:
         from . import menu
 
         menu.register()
     print(f" mdcif_pymol {__version__} loaded: mdcif_load, mdcif_modes, mdcif_morph, "
           "mdcif_animate, mdcif_porcupine, mdcif_plot, mdcif_movie, mdcif_window (type 'mdcif' "
           "for more)")
+    if gui:
+        deps.ensure_matplotlib()

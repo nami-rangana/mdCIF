@@ -51,4 +51,4 @@ select = ["E", "F", "I", "UP", "B"]
 extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.isort]
-known-third-party = ["pymol"]   # PyMOL's package, not the plugin folder viewers/pymol
+known-third-party = ["pymol"]   # PyMOL's package (the plugin is viewers/pymol-mdcif)

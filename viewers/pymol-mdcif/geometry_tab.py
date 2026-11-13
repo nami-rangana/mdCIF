@@ -31,8 +31,8 @@ and 'frame k'. Analyze windows are not saved in sessions.
 
 While the motion plays only the frame marks are redrawn: they are animated matplotlib artists,
 drawn over a copy of the rest of the canvas taken after each full draw (blitting). Without
-matplotlib in PyMOL's Python the tab says how to install it; the values, the list and Save data
-still work.
+matplotlib in PyMOL's Python the tab says so (the plugin installs it when it loads, deps.py:
+a tab opened after that has its plot); the values, the list and Save data still work.
 
 For scripts: ``analyze_tool.windows()`` lists the Geometry tabs of the open Analyze windows,
 oldest first. Each has ``host`` (its window), ``plot`` (a ``plot.Plot``), ``figure`` /
@@ -49,7 +49,7 @@ from pymol import CmdException, cmd
 from pymol.Qt import QtCore, QtGui, QtWidgets
 from pymol.wizard import Wizard
 
-from . import attach
+from . import attach, deps
 from . import commands as cx
 from .mdcif_data import MEASURES
 from .menu import ANALYZE
@@ -77,12 +77,6 @@ from .widgets import (
     shown_frame,
 )
 
-try:
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-    from matplotlib.figure import Figure
-except ImportError:                     # matplotlib is not in PyMOL's Python
-    FigureCanvasQTAgg = Figure = None
-
 Qt = QtCore.Qt
 KINDS = list(MEASURES)
 EXAMPLES = {"distance": "10CA 40CA", "angle": "10CA 11CA 12CA",
@@ -94,11 +88,18 @@ ATOM_TIP = ("Residue number and atom name: 38CA, 38 CA or 38@CA (38@1HB when the
 IMAGE_FILTERS = ["PNG image (*.png)", "SVG image (*.svg)", "PDF document (*.pdf)"]
 DATA_FILTERS = ["CSV file (*.csv)"]
 CANVAS_HEIGHT, PANEL_PIXELS = 200, 150          # minimum canvas height, + per further panel
-NO_MATPLOTLIB = ("The plot needs matplotlib in PyMOL's Python. Close PyMOL and run, in a "
-                 "terminal:\n    \"<PyMOL folder>/python\" -m pip install matplotlib\n"
-                 "(on Windows e.g. C:\\ProgramData\\pymol\\python.exe -m pip install "
-                 "matplotlib). The values, the list and Save data work without it.")
 PICKED = "mdcif_picked"                 # the selection showing the atoms picked so far
+
+
+def matplotlib_canvas():
+    """matplotlib's Figure and Qt canvas classes, or (None, None) when PyMOL's Python lacks
+    matplotlib. Looked up for each new tab: the plugin may have installed it since (deps.py)."""
+    try:
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+    except ImportError:
+        return None, None
+    return Figure, FigureCanvasQTAgg
 
 
 class PickAtoms(Wizard):
@@ -301,6 +302,7 @@ class GeometryTab(Guarded):
         self.note = Note()
         layout.addWidget(self.note)
 
+        Figure, FigureCanvasQTAgg = matplotlib_canvas()
         if Figure is not None:
             self.figure = Figure(figsize=IMAGE_SIZE, dpi=100)
             self.canvas = FigureCanvasQTAgg(self.figure)
@@ -312,7 +314,7 @@ class GeometryTab(Guarded):
                            self.canvas.mpl_connect("resize_event", self._resized)]
         else:
             self.figure = self.canvas = None
-            missing = QtWidgets.QLabel(NO_MATPLOTLIB)
+            missing = QtWidgets.QLabel(deps.missing_text())
             missing.setWordWrap(True)
             missing.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             missing.setStyleSheet("color: #d03b3b")

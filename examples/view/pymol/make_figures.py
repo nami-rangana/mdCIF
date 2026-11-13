@@ -5,7 +5,7 @@ starts in a folder of its own)::
 
     pymol /path/to/mdcif/examples/view/pymol/make_figures.py
 
-It loads the plugin from ``viewers/pymol`` (no install needed), types the commands of each
+It loads the plugin from ``viewers/pymol-mdcif`` (no install needed), types the commands of each
 section of the tutorial as you would (``cmd.do``: they are shown in PyMOL's output), uses the
 MDCIF windows through their controls, and saves every picture and movie in
 ``examples/view/pymol/figures/``; then PyMOL quits. PyMOL's output is also written to
@@ -172,8 +172,8 @@ def s2_plugin():
     section("2. Add the plugin")
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location(  # viewers/pymol as the package mdcif_pymol
-        "mdcif_pymol", os.path.join(REPO, "viewers", "pymol", "__init__.py"))
+    spec = importlib.util.spec_from_file_location(  # the plugin as the package mdcif_pymol
+        "mdcif_pymol", os.path.join(REPO, "viewers", "pymol-mdcif", "__init__.py"))
     mdcif_pymol = importlib.util.module_from_spec(spec)
     sys.modules["mdcif_pymol"] = mdcif_pymol
     spec.loader.exec_module(mdcif_pymol)

@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-PYMOL_DIR = ROOT / "viewers" / "pymol"
+PYMOL_DIR = ROOT / "viewers" / "pymol-mdcif"
 CHIMERAX_SRC = ROOT / "viewers" / "chimerax" / "src"
 
 
@@ -165,8 +165,8 @@ def test_measure(vdata):
 
 @pytest.fixture(scope="module")
 def pymol_plugin():
-    """viewers/pymol loaded as the package mdcif_pymol (as PyMOL loads an installed plugin, by
-    file: putting viewers/ on sys.path would make it 'pymol', PyMOL's own name)."""
+    """viewers/pymol-mdcif loaded by file as the package mdcif_pymol (as PyMOL loads an
+    installed plugin: the folder's name is not a Python name)."""
     pytest.importorskip("pymol")
     spec = importlib.util.spec_from_file_location("mdcif_pymol", PYMOL_DIR / "__init__.py")
     mdcif_pymol = importlib.util.module_from_spec(spec)
@@ -410,6 +410,75 @@ def test_pymol_movie(pm, adk_mdcif, tmp_path):
         assert im.n_frames == 5 and im.size == (80, 60)
     with pytest.raises(CmdException, match="a movie must be"):
         mp.mdcif_movie(str(tmp_path / "m.avi"), anim)
+
+
+@pytest.fixture
+def deps():
+    """The PyMOL plugin's deps.py on its own (no PyMOL needed), with a fresh state."""
+    return _load("mdcif_pymol_deps", PYMOL_DIR / "deps.py")
+
+
+def test_pymol_deps_python_and_pip_command(deps, monkeypatch):
+    """PyMOL's Python: sys.executable when it is a Python, else found in sys.prefix (PyMOL's own
+    program); pip keeps the numpy PyMOL has and installs wheels only."""
+    from importlib.metadata import version
+
+    exe = deps.python_exe()
+    assert exe and deps._probe(exe) is None                     # this Python, with pip
+    monkeypatch.setattr(sys, "executable", os.path.join(sys.prefix, "PyMOLWin.exe"))
+    found = deps.python_exe()
+    assert found and found != sys.executable and deps._probe(found) is None
+    args = deps.pip_command(found)
+    assert args[:4] == [found, "-m", "pip", "install"]
+    assert "--only-binary=:all:" in args and "matplotlib" in args
+    assert f"numpy=={version('numpy')}" in args
+    assert deps.hint() == f"{deps._quoted(found)} -m pip install matplotlib"
+
+
+def test_pymol_deps_install(deps, monkeypatch):
+    """install(): pip's main lines go to the log, success imports matplotlib, a failure says
+    pip's error and how to install by hand. Nothing is downloaded (pip is stubbed)."""
+    pytest.importorskip("matplotlib")
+    runs, logged = [], []
+
+    def pip(result):
+        def stream(args, log):
+            runs.append(args)
+            log("   Successfully installed matplotlib")
+            return result
+        return stream
+
+    monkeypatch.setattr(deps, "available", lambda: bool(runs))   # missing until pip ran
+    monkeypatch.setattr(deps, "_stream", pip((0, [])))
+    ok, message = deps.install(log=logged.append)
+    assert ok and len(runs) == 1 and runs[0][1:4] == ["-m", "pip", "install"]
+    assert logged == ["   Successfully installed matplotlib"]
+    assert message.startswith("matplotlib ") and " installed" in message
+    assert deps._state["status"] == "done" and deps.status().startswith("matplotlib ")
+
+    runs.clear()
+    monkeypatch.setattr(deps, "_stream", pip((1, [
+        "Collecting matplotlib", "ERROR: No matching distribution found for matplotlib"])))
+    ok, message = deps.install(log=logged.append)
+    assert not ok and "No matching distribution" in message
+    assert deps._state["status"] == "failed"
+    assert deps.hint() in deps.failure_text(message) and deps.hint() in deps.missing_text()
+
+
+def test_pymol_deps_system_python(deps, monkeypatch, tmp_path):
+    """A Python owned by the system's package manager (PEP 668): no pip, the package manager's
+    command instead."""
+    (tmp_path / "EXTERNALLY-MANAGED").write_text("[externally-managed]\n")
+    monkeypatch.setattr(sys, "base_prefix", sys.prefix)
+    monkeypatch.setattr(deps.sysconfig, "get_paths", lambda: {"stdlib": str(tmp_path)})
+    monkeypatch.setattr(deps.shutil, "which", lambda t: "/usr/bin/apt" if t == "apt" else None)
+    monkeypatch.setattr(deps, "available", lambda: False)
+    monkeypatch.setattr(deps, "_stream", lambda *a: pytest.fail("pip must not run"))
+    assert deps.externally_managed()
+    assert deps.hint() == "sudo apt install python3-matplotlib"
+    ok, message = deps.install()
+    assert not ok and "sudo apt install python3-matplotlib" in message
+    assert deps._state["status"] == "system"
 
 
 def test_pymol_windows_offscreen(pm, adk_mdcif, tmp_path, monkeypatch):

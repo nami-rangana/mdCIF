@@ -41,7 +41,7 @@ See [docs/proposal.md](docs/proposal.md) for goals and milestones and
 |------|----------|
 | `src/mdcif/` | Core Python package: trajectory loading, clustering, modes, provenance, mmCIF writer/reader/validator, CLI |
 | `viewers/chimerax/` | ChimeraX bundle `ChimeraX-MDCIF` (`mdcif ...` commands) |
-| `viewers/pymol/` | PyMOL plugin `mdcif_pymol` (`mdcif_*` commands and the MDCIF menu's windows) |
+| `viewers/pymol-mdcif/` | PyMOL plugin `mdcif_pymol` (`mdcif_*` commands and the MDCIF menu's windows) |
 | `docs/spec/` | Format spec, IHM/PDBx category mapping, DDL2 extension dictionary |
 | `examples/` | Provenance template; 3GB1 MELD example with a walkthrough notebook; `examples/data/` holds local data (git-ignored) |
 | `tests/` | pytest suite; small fixtures in `tests/data/` |
@@ -166,8 +166,8 @@ of the mode.
 ### 5. Install the PyMOL plugin
 
 In PyMOL (incentive or open-source, 2.x or newer): *Plugin → Plugin Manager → Install New
-Plugin → Choose file…*, pick `viewers/pymol/__init__.py`, and restart PyMOL (the Plugin Manager
-names a plugin after its folder, so it lists this one as `pymol`). Then
+Plugin → Choose file…*, pick `viewers/pymol-mdcif/__init__.py`, and restart PyMOL (the Plugin
+Manager names a plugin after its folder, so it lists this one as `pymol-mdcif`). Then
 `load` opens an mdCIF file as one object per model, in a group:
 
 ```
@@ -181,14 +181,15 @@ mdcif_plot distance, /gb1_m1//A/10/CA, /gb1_m1//A/40/CA
 ```
 
 The **MDCIF** menu opens windows that do the same with sliders (Porcupine, Animate, Analyze);
-the Analyze window needs matplotlib in PyMOL's Python (`<PyMOL folder>/python -m pip install
-matplotlib`). Step by step: [examples/view/pymol/tutorial.md](examples/view/pymol/tutorial.md).
-Without installing (development), type this on one line at PyMOL's command line; it loads
-`viewers/pymol` as the package `mdcif_pymol` (don't put `viewers/` on `sys.path`: the folder
-would then be imported as `pymol`, PyMOL's own name):
+the Analyze window draws its plots with matplotlib, which the plugin installs into PyMOL's own
+Python (pip, in the background) when it loads and PyMOL lacks it; the output says how it went.
+Step by step: [examples/view/pymol/tutorial.md](examples/view/pymol/tutorial.md).
+Without installing (development): `cd` to your copy of this repository at PyMOL's command line,
+then type this on one line; it loads `viewers/pymol-mdcif` as the package `mdcif_pymol` (the
+folder's name isn't a Python name):
 
 ```
-/import importlib.util as u, sys; s = u.spec_from_file_location("mdcif_pymol", "C:/path/to/mdcif/viewers/pymol/__init__.py"); m = sys.modules["mdcif_pymol"] = u.module_from_spec(s); s.loader.exec_module(m); m.__init_plugin__()
+/import importlib.util as u, os, sys; s = u.spec_from_file_location("mdcif_pymol", os.path.abspath("viewers/pymol-mdcif/__init__.py")); m = sys.modules["mdcif_pymol"] = u.module_from_spec(s); s.loader.exec_module(m); m.__init_plugin__()
 ```
 
 ### 6. View in a Jupyter notebook (py3Dmol)

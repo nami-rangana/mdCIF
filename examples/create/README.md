@@ -87,7 +87,7 @@ Python, no plugin: [`../view/python/view_mdcif.ipynb`](../view/python/view_mdcif
 shows the models, draws each state's three modes as porcupine plots and plays them as movies
 (py3Dmol). ChimeraX: [`../view/chimerax/`](../view/chimerax/README.md).
 
-PyMOL (`viewers/pymol`, step by step in [`../view/pymol/tutorial.md`](../view/pymol/tutorial.md)),
+PyMOL (`viewers/pymol-mdcif`, step by step in [`../view/pymol/tutorial.md`](../view/pymol/tutorial.md)),
 from the repository root:
 
 ```

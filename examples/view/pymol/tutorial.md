@@ -2,9 +2,10 @@
 
 An mdCIF file captures a simulation's main states as model structures, plus the three largest
 **modes** of each state. A mode shows how the atoms move together. This tutorial looks at such
-a file in [PyMOL](https://pymol.org/) with the mdcif plugin for PyMOL (`mdcif_pymol` in
-[`viewers/pymol`](../../../viewers/pymol)). The plugin adds a few `mdcif_` commands, and a menu,
-**MDCIF**, whose windows do the main ones with sliders and buttons instead of typing:
+a file in [PyMOL](https://pymol.org/) with the mdcif plugin for PyMOL (the folder
+[`viewers/pymol-mdcif`](../../../viewers/pymol-mdcif)). The plugin adds a few `mdcif_`
+commands, and a menu, **MDCIF**, whose windows do the main ones with sliders and buttons
+instead of typing:
 
 | Command | Or, in the MDCIF menu | What it does |
 |---|---|---|
@@ -35,8 +36,9 @@ you like, or both. Whatever you do in a window, PyMOL's output shows the matchin
 if you had typed it (`PyMOL>mdcif_porcupine …`), so the windows are also a good way to learn
 the commands.
 
-**You'll need:** PyMOL 2 or newer (we used 3.1), with matplotlib for the plot window
-(section 1), a copy of this repository (for the plugin), and the example file above.
+**You'll need:** PyMOL 2 or newer (we used 3.1), a copy of this repository (for the plugin),
+the example file above, and an internet connection when you add the plugin (it installs
+matplotlib, which draws the plots, if your PyMOL lacks it: section 2).
 
 **Contents:** [1. Install PyMOL](#1-install-pymol) ·
 [2. Add the plugin](#2-add-the-mdcif-plugin) · [3. Open the file](#3-open-the-file) ·
@@ -67,39 +69,49 @@ print(cmd.get_version()[0])
 3.1.0
 ```
 
-**matplotlib, for the plot window.** The Analyze window of section 7 draws its plots with
-matplotlib. Open-source PyMOL from conda-forge usually has it already. Incentive PyMOL does not:
-close PyMOL and install it into PyMOL's own Python from a terminal (Command Prompt on Windows).
-On Windows, with PyMOL installed for all users:
-
-```
-C:\ProgramData\pymol\python.exe -m pip install matplotlib
-```
-
-Use the folder PyMOL is installed in if it is elsewhere (on macOS, `/Applications/PyMOL.app/
-Contents/bin/python -m pip install matplotlib`; not tested). Everything else in this tutorial
-works without matplotlib; only the plot window and plot pictures need it.
-
 ## 2. Add the mdcif plugin
 
 1. In PyMOL, choose **Plugin → Plugin Manager**, then the **Install New Plugin** tab.
 2. Under "Install from local file", click **Choose file…** and pick
-   `viewers/pymol/__init__.py` in your copy of this repository.
+   `viewers/pymol-mdcif/__init__.py` in your copy of this repository.
 3. PyMOL may ask which plugin directory to use: take the first one. If it then says it is
    "Unable to write to the plugin directory" and offers to create a user plugin directory,
    answer **Yes**.
 
-PyMOL says `Plugin "pymol" has been installed.` (the Plugin Manager names a plugin after the
-folder it comes from, here `viewers/pymol`; it is the mdcif plugin), and its output shows
+PyMOL says `Plugin "pymol-mdcif" has been installed.` (the Plugin Manager names a plugin after
+the folder it comes from), and its output shows
 
 ```
  mdcif_pymol 0.2.0 loaded: mdcif_load, mdcif_modes, mdcif_morph, mdcif_animate, mdcif_porcupine, mdcif_plot, mdcif_movie, mdcif_window (type 'mdcif' for more)
 ```
 
+**matplotlib is installed for you.** The plots of section 7 are drawn with matplotlib, which
+many PyMOLs don't have (incentive PyMOL doesn't, nor does open-source PyMOL from conda-forge).
+When the plugin finds PyMOL without it, it installs it into PyMOL's own Python with pip, right
+after you add the plugin. This needs an internet connection and takes a minute or so; it runs in
+the background, so you can carry on meanwhile, and PyMOL's output follows along:
+
+```
+ mdcif: the Analyze window's plots need matplotlib, which this PyMOL lacks: installing it into PyMOL's Python with pip, in the background (PyMOL can be used meanwhile; it takes a minute or so) ...
+   Collecting matplotlib
+   ...
+   Installing collected packages: tzdata, pyparsing, pillow, kiwisolver, fonttools, cycler, contourpy, python-dateutil, matplotlib
+   Successfully installed contourpy-1.3.3 cycler-0.12.1 fonttools-4.68.0 kiwisolver-1.5.1 matplotlib-3.11.2 pillow-13.0.0 pyparsing-3.3.3 python-dateutil-4.0.0 tzdata-2026.6
+ mdcif: matplotlib 3.11.2 installed: the Analyze window draws its plots (a window opened before now: close it and open it again)
+```
+
+The packages and versions depend on your PyMOL. PyMOL's own packages stay as they are (numpy
+keeps its version). If matplotlib can't be installed, for example without internet, the output
+says why and gives the command that installs it by hand for your PyMOL, to type in a terminal
+(Command Prompt on Windows); the plugin also tries again the next time PyMOL starts. A PyMOL
+that came with Linux (installed with apt or dnf) gets the system's command instead, such as
+`sudo apt install python3-matplotlib`. Only the plots need matplotlib: everything else in this
+tutorial works without it.
+
 The plugin stays installed: it loads every time PyMOL starts. To check it, type `mdcif`:
 
 ```
- mdcif_pymol 0.2.0. Commands: mdcif_load | mdcif_modes | mdcif_morph | mdcif_animate | mdcif_porcupine | mdcif_plot | mdcif_movie | mdcif_window. Attaching mdcif data to loaded .cif files: on. Windows: menu MDCIF > Porcupine, Animate, Analyze.
+ mdcif_pymol 0.2.0. Commands: mdcif_load | mdcif_modes | mdcif_morph | mdcif_animate | mdcif_porcupine | mdcif_plot | mdcif_movie | mdcif_window. Attaching mdcif data to loaded .cif files: on. Windows: menu MDCIF > Porcupine, Animate, Analyze. Plots: matplotlib 3.11.2.
 ```
 
 "Attaching mdcif data to loaded .cif files: on" matters: the plugin looks at every `.cif` file
@@ -121,15 +133,7 @@ protein, or double-click the title bar to dock it at the side of PyMOL's window.
 whether to install it again, or anyway: answer OK), then restart PyMOL. The plugin's files are
 copied into PyMOL's plugin directory, so later changes to your copy of the repository need this
 step. **Plugin → Plugin Manager → Installed Plugins** can disable or uninstall it (it is listed
-as `pymol`).
-
-**Without installing**, for example to try a copy of the plugin you are changing, type this on
-one line (the path is your copy of this repository). It loads the folder `viewers/pymol` under
-the name `mdcif_pymol`:
-
-```
-/import importlib.util as u, sys; s = u.spec_from_file_location("mdcif_pymol", "C:/path/to/mdcif/viewers/pymol/__init__.py"); m = sys.modules["mdcif_pymol"] = u.module_from_spec(s); s.loader.exec_module(m); m.__init_plugin__()
-```
+as `pymol-mdcif`).
 
 ## 3. Open the file
 
@@ -137,8 +141,11 @@ Open the mdCIF file the way you open any structure in PyMOL: **File → Open…*
 file, drag the file onto PyMOL's window, or type
 
 ```
-load /path/to/mdcif/examples/create/1_basic/gb1_meld_300K.cif, gb1
+load examples/create/1_basic/gb1_meld_300K.cif, gb1
 ```
+
+This path starts at your copy of this repository: type `cd` and the folder of your copy first
+(`pwd` shows the folder PyMOL is in), or give the file's full path instead.
 
 The name after the comma, `gb1`, is optional: without it the objects are named after the file
 (`gb1_meld_300K`). We use `gb1` to keep the commands short. PyMOL's output shows the plugin's
@@ -482,9 +489,11 @@ movie). The window is greyed out while it records; then the line at the bottom s
 saved to …`, and the motion plays on. The output shows the command it ran:
 
 ```
- PyMOL>mdcif_movie C:\path\to\gb1_meld_300K_model1_cluster_mode2.gif, gb1_m1_mode2
- mdcif: movie saved to C:\path\to\gb1_meld_300K_model1_cluster_mode2.gif (30 frames at 15 frames per second)
+ PyMOL>mdcif_movie …/gb1_meld_300K_model1_cluster_mode2.gif, gb1_m1_mode2
+ mdcif: movie saved to …/gb1_meld_300K_model1_cluster_mode2.gif (30 frames at 15 frames per second)
 ```
+
+(`…` stands for the folder you chose.)
 
 A GIF works in every PyMOL. MP4, WebM and QuickTime (`.mov`) movies need ffmpeg, which PyMOL
 doesn't always have: when it is missing, the window offers GIF only, and PyMOL's **File →
@@ -719,7 +728,7 @@ a dihedral. In Python, `pandas.read_csv("gb1_mode1.csv", comment="#")` reads it.
 
 ```
 # mdcif plot (mdcif_pymol 0.2.0)
-# file: /path/to/mdcif/examples/create/1_basic/gb1_meld_300K.cif
+# file: …/examples/create/1_basic/gb1_meld_300K.cif
 # model: 1 (Cluster 1 medoid (frame 142700, t = 285.402 ns))
 # scope: cluster
 # mode: 1
@@ -940,7 +949,7 @@ it uses the restored copy's frames and makes no new copy.
 | save a plot and its numbers | `mdcif_plot … save_image=plot.png, save_data=plot.csv` | Analyze…: Save plot… / Save data… (every panel) |
 | open a window | `mdcif_window porcupine` (or `animate`, `analyze`) | the MDCIF menu, or Plugin → MDCIF |
 | every option of a command | `help mdcif_porcupine` | |
-| install or update the plugin | Plugin → Plugin Manager → Install New Plugin → `viewers/pymol/__init__.py`, then restart PyMOL | |
+| install or update the plugin | Plugin → Plugin Manager → Install New Plugin → `viewers/pymol-mdcif/__init__.py`, then restart PyMOL (matplotlib comes with it) | |
 | colour a model | `color 0x6495ed, gb1_m1` | |
 | show some residues as sticks | `show sticks, gb1_m1 and resi 9-13` | |
 | save a picture | `png picture.png, width=1200, ray=1` | |

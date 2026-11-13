@@ -39,7 +39,7 @@ import os
 import numpy as np
 from pymol import CmdException, cmd
 
-from . import __version__, attach
+from . import __version__, attach, deps
 from .mdcif_data import MEASURES, MdcifFile, arrows, measure, mode_frames, morph_frames
 from .plot import A_KIND, IMAGE_SUFFIXES, KIND_OF, PLOT_MADE, UNITS, Plot, atom_label, plots
 from .plot import save_image as _save_image
@@ -292,7 +292,7 @@ def mdcif():
     print(f" mdcif_pymol {__version__}. Commands: mdcif_load | mdcif_modes | mdcif_morph | "
           f"mdcif_animate | mdcif_porcupine | mdcif_plot | mdcif_movie | mdcif_window. "
           f"Attaching mdcif data to loaded .cif files: {hook}. Windows: menu MDCIF > "
-          f"Porcupine, Animate, Analyze{where}.")
+          f"Porcupine, Animate, Analyze{where}. Plots: {deps.status()}.")
 
 
 def mdcif_load(path, name=None, quiet=0):
@@ -817,8 +817,9 @@ def save_plot_file(plot, path, what):
     try:
         (_write_csv if what == "data" else _save_image)(plot, path)
     except ImportError:
-        _error("saving a plot image needs matplotlib in PyMOL's Python (see the tutorial: "
-               "python -m pip install matplotlib)")
+        _error("saving a plot image needs matplotlib in PyMOL's Python"
+               + (", which the plugin is installing now (see the output)" if deps.installing()
+                  else f"; to install it, in a terminal: {deps.hint()}"))
     except (OSError, ValueError) as exc:
         _error(f"could not save the plot {what}: {exc}")
     print(f" {plot.spec} {' + '.join(plot.kinds)} plot: {what} saved to {path}")
